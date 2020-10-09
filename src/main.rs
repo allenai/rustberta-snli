@@ -1,4 +1,5 @@
 use anyhow::Result;
+use cached_path::{self, cached_path_with_options};
 use env_logger::Env;
 use log::info;
 use rust_tokenizers::{Tokenizer, TruncationStrategy};
@@ -10,16 +11,19 @@ pub mod tokenization;
 
 use crate::modeling::TransformerSequenceClassificationModel;
 
-const RESOURCE_ROOT: &str = "rustbert";
-const MODEL: &str = "roberta";
+const TRANSFORMER_MODEL: &str =
+    "https://storage.googleapis.com/allennlp-public-models/rustberta.tar.gz";
 const MAX_SEQUENCE_LENGTH: usize = 512;
 const TRUNCATION_STRATEGY: TruncationStrategy = TruncationStrategy::LongestFirst;
 
 fn main() -> Result<()> {
     env_logger::from_env(Env::default().default_filter_or("info")).init();
 
-    let home = dirs::home_dir().unwrap();
-    let model_resource_dir = home.join(RESOURCE_ROOT).join(MODEL);
+    info!("Caching pretrained transformer model");
+    let model_resource_dir = cached_path_with_options(
+        TRANSFORMER_MODEL,
+        &cached_path::Options::default().extract(),
+    )?;
 
     let device = Device::cuda_if_available();
 
