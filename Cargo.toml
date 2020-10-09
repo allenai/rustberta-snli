@@ -1,0 +1,15 @@
+[package]
+name = "roberta-snli"
+version = "0.1.0"
+authors = ["epwalsh <epwalsh10@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+rust-bert = { version = "0.10" }
+tch = "0.2.1"
+anyhow = "1.0"
+rust_tokenizers = "~5.0.1"
+dirs = "3.0"
+cached-path = "0.4.5"
+log = "0.4"
+env_logger = "0.7"
