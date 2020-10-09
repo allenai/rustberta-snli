@@ -25,7 +25,7 @@ pub fn load_model(
     .collect();
     let label2id: HashMap<String, i64> = id2label
         .iter()
-        .map(|(id, label)| (label.clone(), id.clone()))
+        .map(|(id, label)| (label.clone(), *id))
         .collect();
 
     let mut config = BertConfig::from_file(&config_path);
