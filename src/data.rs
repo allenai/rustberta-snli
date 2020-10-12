@@ -23,7 +23,7 @@ impl Batch {
             type_ids: Tensor::of_slice(type_ids)
                 .totype(tch::Kind::Int64)
                 .unsqueeze(0),
-            gold_label: gold_label.and_then(|label| Some(Tensor::from(label).unsqueeze(0))),
+            gold_label: gold_label.map(|label| Tensor::from(label).unsqueeze(0)),
         }
     }
 
@@ -31,7 +31,7 @@ impl Batch {
         Self::new(
             &input.token_ids,
             &input.segment_ids,
-            gold_label.and_then(|label| Some(common::label2id(label))),
+            gold_label.map(|label| common::label2id(label)),
         )
     }
 }
@@ -70,7 +70,7 @@ impl Reader {
             let tx_batch = tx_batch.clone();
 
             let tokenizer_dir = self.tokenizer_dir.clone();
-            let max_sequence_length = self.max_sequence_length.clone();
+            let max_sequence_length = self.max_sequence_length;
 
             let handle = thread::spawn(move || {
                 info!("Worker[{}] initializing", i);
