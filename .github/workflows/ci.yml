@@ -53,7 +53,8 @@ jobs:
       if: always()
       uses: actions-rs/cargo@v1
       with:
-        command: run -- --help
+        command: run
+        args: -- --help
 
   lint:
     name: Lint
