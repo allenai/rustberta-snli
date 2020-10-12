@@ -43,11 +43,17 @@ jobs:
         path: target
         key: cargo build ${{ github.job }} ${{ runner.os }} ${{ env.RUST_VERSION }} ${{ hashFiles('**/Cargo.toml') }} ${{ env.WEEK_NUMBER }}
 
+    - name: Test
+      if: always()
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+
     - name: Build
       if: always()
       uses: actions-rs/cargo@v1
       with:
-        command: run
+        command: run -- --help
 
   lint:
     name: Lint

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use tch::{nn, Device, Tensor};
 
+use crate::common;
 use crate::data::Batch;
 
 pub fn load_model(
@@ -16,9 +17,12 @@ pub fn load_model(
     let weights_path = model_resource_dir.join("model.ot");
 
     let id2label: HashMap<i64, String> = [
-        (0, "entailment".into()),
-        (1, "contradiction".into()),
-        (2, "neutral".into()),
+        (common::label2id("entailment") as i64, "entailment".into()),
+        (
+            common::label2id("contradiction") as i64,
+            "contradiction".into(),
+        ),
+        (common::label2id("neutral") as i64, "neutral".into()),
     ]
     .iter()
     .cloned()
