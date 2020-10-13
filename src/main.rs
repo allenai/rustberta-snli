@@ -75,6 +75,7 @@ fn predict(premise: &str, hypothesis: &str) -> Result<()> {
     )?;
 
     let device = Device::cuda_if_available();
+    info!("Running on {:?}", device);
 
     info!("Loading tokenizer");
     let tokenizer = tokenization::load_tokenizer(&model_resource_dir)?;
@@ -90,7 +91,7 @@ fn predict(premise: &str, hypothesis: &str) -> Result<()> {
         &TRUNCATION_STRATEGY,
         0,
     );
-    let batch = data::Batch::from_tokenized_input(&inputs, None);
+    let batch = data::Batch::from_tokenized_input(&inputs, None).to_device(device);
 
     info!("Running forward pass");
     let logits = model.forward_on_batch(batch);
