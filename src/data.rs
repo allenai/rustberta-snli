@@ -147,7 +147,7 @@ impl Reader {
         Ok(Reader {
             tokenizer_dir: String::from(model_resource_dir),
             max_sequence_length: 512,
-            n_workers: num_cpus::get_physical(),
+            n_workers: num_cpus::get(),
         })
     }
 
