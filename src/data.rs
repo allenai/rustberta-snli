@@ -30,6 +30,18 @@ impl Batch {
         }
     }
 
+    pub fn to_device(&self, device: tch::Device) -> Self {
+        Self {
+            token_ids: self.token_ids.to_device(device),
+            type_ids: self.type_ids.to_device(device),
+            gold_labels: self
+                .gold_labels
+                .as_ref()
+                .map(|label| label.to_device(device)),
+            mask: self.mask.to_device(device),
+        }
+    }
+
     pub fn from_tokenized_input(input: &TokenizedInput, gold_label: Option<&str>) -> Self {
         Self::new(
             &input.token_ids,
@@ -44,7 +56,7 @@ impl Batch {
     }
 
     pub fn combine(batches: &[Batch]) -> Self {
-        if batches.len() == 0 {
+        if batches.is_empty() {
             panic!("Tried to combine an empty slice of batches");
         }
 
@@ -101,10 +113,8 @@ impl Batch {
 
             if let Some(label_tensors) = gold_labels_tensors.as_mut() {
                 label_tensors.push(b.gold_labels.as_ref().unwrap());
-            } else {
-                if b.gold_labels.is_some() {
-                    panic!("expect batch without gold labels");
-                }
+            } else if b.gold_labels.is_some() {
+                panic!("expect batch without gold labels");
             }
         }
 
