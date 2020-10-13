@@ -50,6 +50,11 @@ impl Batch {
         )
     }
 
+    pub fn size(&self) -> (i64, i64) {
+        let size = self.token_ids.size();
+        (size[0], size[1])
+    }
+
     pub fn combine(batches: &[Batch]) -> Self {
         if batches.is_empty() {
             panic!("Tried to combine an empty slice of batches");
@@ -232,7 +237,11 @@ mod tests {
             Batch::new(&[0, 3, 4, 2], &[0, 0, 0, 0], Some(0)),
             Batch::new(&[0, 3, 2], &[0, 0, 0], Some(1)),
         ];
+        assert_eq!(batches[0].size(), (1, 4));
+        assert_eq!(batches[1].size(), (1, 3));
+
         let batch = Batch::combine(&batches);
+        assert_eq!(batch.size(), (2, 4));
 
         assert_eq!(
             Vec::<Vec<i64>>::from(batch.token_ids),
