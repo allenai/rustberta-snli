@@ -6,14 +6,17 @@ A Rust implementation of a RoBERTa classification model for the SNLI dataset.
 
 First of all, you'll need the Rust toolchain installed. If you're already a Rustacean, skip ahead to the "Additional setup for CUDA" section.
 
-Now, luckily, installing Rust is nothing like installing a proper Python environment, i.e. it doesn't take years of sys admin experience. All you have to do is run this:
+Now, luckily, installing Rust is nothing like installing a proper Python environment, i.e. it doesn't require a PhD in system administration or
+the courage to blindly run every sudo command you can find on Stack Overflow until something works or completely breaks your computer.
+
+All you have to do is run this:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then just make sure `~/.cargo/bin` is in your `$PATH`, and you're good to go.
-You can check this by running `rustup --version` and `cargo --version`.
+You can test for success by running `rustup --version` and `cargo --version`.
 
 > `rustup` can be used to update your toolchain when a new version of Rust is released (which happens monthly). `cargo` is used to compile, run, and test your code, as well as to build documentation, publish your crate (the Rust term for a module/library) to [crates.io](crates.io), and install binaries from other crates on [crates.io](crates.io).
 
