@@ -2,7 +2,7 @@ use anyhow::Result;
 use cached_path::{self, cached_path_with_options};
 use env_logger::Env;
 use log::info;
-use rust_tokenizers::{Tokenizer, TruncationStrategy};
+use rust_tokenizers::tokenizer::{Tokenizer, TruncationStrategy};
 use structopt::StructOpt;
 use tch::Device;
 

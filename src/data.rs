@@ -1,10 +1,11 @@
 use anyhow::Result;
-use log::info;
-use rust_tokenizers::{TokenizedInput, Tokenizer, TruncationStrategy};
+use crossbeam::thread;
+use log::debug;
+use rust_tokenizers::tokenizer::{RobertaTokenizer, Tokenizer, TruncationStrategy};
+use rust_tokenizers::TokenizedInput;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::thread;
 use tch::Tensor;
 
 use crate::common;
@@ -137,15 +138,17 @@ pub struct Instance {
 }
 
 pub struct Reader {
-    tokenizer_dir: String,
+    tokenizer: RobertaTokenizer,
     max_sequence_length: usize,
+    truncation_strategy: TruncationStrategy,
     n_workers: usize,
 }
 
 impl Reader {
     pub fn new(model_resource_dir: &str) -> Result<Self> {
         Ok(Reader {
-            tokenizer_dir: String::from(model_resource_dir),
+            tokenizer: load_tokenizer(model_resource_dir)?,
+            truncation_strategy: TruncationStrategy::LongestFirst,
             max_sequence_length: 512,
             n_workers: num_cpus::get(),
         })
@@ -155,75 +158,72 @@ impl Reader {
         let (tx_line, rx_line) = flume::unbounded::<String>();
         let (tx_batch, rx_batch) = flume::unbounded::<Batch>();
 
-        let mut workers: Vec<thread::JoinHandle<_>> = Vec::with_capacity(self.n_workers);
-        for i in 0..self.n_workers {
-            let rx_line = rx_line.clone();
-            let tx_batch = tx_batch.clone();
-
-            let tokenizer_dir = self.tokenizer_dir.clone();
-            let max_sequence_length = self.max_sequence_length;
-
-            let handle = thread::spawn(move || {
-                info!("Worker[{}] initializing", i);
-                let tokenizer = load_tokenizer(tokenizer_dir).expect("failed to load tokenizer");
-
-                rx_line.iter().for_each(|line| {
-                    let instance: Instance =
-                        serde_json::from_str(&line).expect("Failed to deserialize instance");
-                    match instance.gold_label.as_deref() {
-                        Some("-") => {
-                            // invalid instance, skip.
-                        }
-                        _ => {
-                            let inputs = tokenizer.encode(
-                                &instance.premise,
-                                Some(&instance.hypothesis),
-                                max_sequence_length,
-                                &TruncationStrategy::LongestFirst,
-                                0,
-                            );
-                            let batch = Batch::from_tokenized_input(
-                                &inputs,
-                                instance.gold_label.as_deref(),
-                            );
-
-                            tx_batch
-                                .send(batch)
-                                .expect("Failed to send batch through channel");
-                        }
-                    };
+        thread::scope(|s| {
+            let mut workers: Vec<thread::ScopedJoinHandle<_>> = Vec::with_capacity(self.n_workers);
+            for i in 0..self.n_workers {
+                let rx_line = rx_line.clone();
+                let tx_batch = tx_batch.clone();
+                let handle = s.spawn(move |_| {
+                    debug!("Worker[{}] initializing", i);
+                    self.process_lines(rx_line, tx_batch);
+                    debug!("Worker[{}] finished", i);
                 });
+                workers.push(handle);
+            }
 
-                info!("Worker[{}] finished", i);
+            let path = String::from(path);
+            let producer = s.spawn(move |_| {
+                let file = File::open(path).expect("Failed to read file");
+                let lines = io::BufReader::new(file).lines();
+                for line in lines {
+                    let line = line.expect("IO error reading line");
+                    tx_line
+                        .send(line)
+                        .expect("Failed to send line through channel");
+                }
             });
 
-            workers.push(handle);
-        }
+            drop(tx_batch);
 
-        let path = String::from(path);
-        let producer = thread::spawn(move || {
-            let file = File::open(path).expect("Failed to read fiel");
-            let lines = io::BufReader::new(file).lines();
-            for line in lines {
-                let line = line.expect("IO error reading line");
-                tx_line
-                    .send(line)
-                    .expect("Failed to send line through channel");
+            let progress_bar = common::new_progress_bar();
+            let data: Vec<Batch> = progress_bar.wrap_iter(rx_batch.iter()).collect();
+            progress_bar.finish_at_current_pos();
+
+            producer.join().expect("The producer has panicked");
+            for worker in workers {
+                worker.join().expect("The worker has panicked");
             }
+
+            Ok(data)
+        })
+        .unwrap()
+    }
+
+    fn process_lines(&self, rx_line: flume::Receiver<String>, tx_batch: flume::Sender<Batch>) {
+        rx_line.iter().for_each(|line| {
+            let instance: Instance =
+                serde_json::from_str(&line).expect("Failed to deserialize instance");
+            match instance.gold_label.as_deref() {
+                Some("-") => {
+                    // invalid instance, skip.
+                }
+                _ => {
+                    let inputs = self.tokenizer.encode(
+                        &instance.premise,
+                        Some(&instance.hypothesis),
+                        self.max_sequence_length,
+                        &self.truncation_strategy,
+                        0,
+                    );
+                    let batch =
+                        Batch::from_tokenized_input(&inputs, instance.gold_label.as_deref());
+
+                    tx_batch
+                        .send(batch)
+                        .expect("Failed to send batch through channel");
+                }
+            };
         });
-
-        drop(tx_batch);
-
-        let progress_bar = common::new_progress_bar();
-        let data: Vec<Batch> = progress_bar.wrap_iter(rx_batch.iter()).collect();
-        progress_bar.finish_at_current_pos();
-
-        producer.join().expect("The producer has panicked");
-        for worker in workers {
-            worker.join().expect("The worker has panicked");
-        }
-
-        Ok(data)
     }
 }
 
@@ -267,8 +267,6 @@ mod tests {
         // Set 1 worker so the order is deterministic.
         reader.n_workers = 1;
 
-        let tokenizer = load_tokenizer(&reader.tokenizer_dir).expect("failed to load tokenizer");
-
         let mut data = reader.read("test_fixtures/snli.jsonl").unwrap();
 
         assert_eq!(data.len(), 3);
@@ -281,7 +279,7 @@ mod tests {
         assert_eq!(Vec::<i64>::from(label), [2]);
 
         let token_ids = Vec::<i64>::from(batch.token_ids);
-        let string = tokenizer.decode(
+        let string = reader.tokenizer.decode(
             token_ids, false, // skip special tokens
             true,  // clean up tokenizaiton spaces
         );

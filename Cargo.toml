@@ -8,7 +8,7 @@ edition = "2018"
 rust-bert = { version = "0.10" }
 tch = "0.2.1"
 anyhow = "1.0"
-rust_tokenizers = "~5.0.1"
+rust_tokenizers = { git = "https://github.com/guillaume-be/rust-tokenizers", branch = "multithreded_bpe" }
 dirs = "3.0"
 cached-path = "0.4.5"
 log = "0.4"
@@ -19,3 +19,4 @@ serde_json = "1.0"
 indicatif = "0.15"
 flume = "0.9"
 num_cpus = "1.13"
+crossbeam = "0.8"
