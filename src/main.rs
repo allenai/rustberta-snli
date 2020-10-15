@@ -94,8 +94,8 @@ fn predict(premise: &str, hypothesis: &str) -> Result<()> {
     let batch = data::Batch::from_tokenized_input(&inputs, None).to_device(device);
 
     info!("Running forward pass");
-    let logits = model.forward_on_batch(batch);
-    logits.print();
+    let labels = model.predict(batch);
+    println!("Best prediction: {}", labels[0]);
 
     Ok(())
 }
