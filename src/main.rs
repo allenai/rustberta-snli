@@ -2,7 +2,7 @@ use anyhow::Result;
 use cached_path::{self, cached_path_with_options};
 use env_logger::Env;
 use log::info;
-use rust_tokenizers::{Tokenizer, TruncationStrategy};
+use rust_tokenizers::tokenizer::{Tokenizer, TruncationStrategy};
 use structopt::StructOpt;
 use tch::Device;
 
@@ -94,8 +94,8 @@ fn predict(premise: &str, hypothesis: &str) -> Result<()> {
     let batch = data::Batch::from_tokenized_input(&inputs, None).to_device(device);
 
     info!("Running forward pass");
-    let logits = model.forward_on_batch(batch);
-    logits.print();
+    let labels = model.predict(batch);
+    println!("Best prediction: {}", labels[0]);
 
     Ok(())
 }

@@ -7,6 +7,15 @@ pub(crate) fn label2id(label: &str) -> u8 {
     }
 }
 
+pub(crate) fn id2label(id: u8) -> &'static str {
+    match id {
+        0 => "entailment",
+        1 => "contradiction",
+        2 => "neutral",
+        _ => panic!("Bad label ID {}", id),
+    }
+}
+
 pub(crate) fn new_progress_bar() -> indicatif::ProgressBar {
     let progress_bar = indicatif::ProgressBar::new_spinner().with_style(
         indicatif::ProgressStyle::default_spinner()
@@ -14,4 +23,17 @@ pub(crate) fn new_progress_bar() -> indicatif::ProgressBar {
     );
     progress_bar.set_draw_delta(1_117);
     progress_bar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_label_and_label_ids() {
+        for id in 0..3 {
+            let label = id2label(id);
+            assert_eq!(label2id(label), id);
+        }
+    }
 }

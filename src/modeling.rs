@@ -4,7 +4,7 @@ use rust_bert::roberta::RobertaForSequenceClassification;
 use rust_bert::Config;
 use std::collections::HashMap;
 use std::path::Path;
-use tch::{nn, Device, Tensor};
+use tch::{nn, no_grad, Device, Tensor};
 
 use crate::common;
 use crate::data::Batch;
@@ -47,6 +47,25 @@ pub fn load_model(
 pub trait TransformerSequenceClassificationModel {
     /// Returns logits.
     fn forward_on_batch(&self, b: Batch) -> Tensor;
+
+    /// Returns the best prediction for each instance in the batch.
+    fn predict(&self, b: Batch) -> Vec<&'static str> {
+        let (batch_size, _) = b.size();
+
+        // shape: (batch_size, n_labels)
+        let logits = no_grad(|| self.forward_on_batch(b));
+
+        // shape: (batch_size,)
+        let ids = logits.argmax(-1, false);
+
+        let mut labels = Vec::with_capacity(batch_size as usize);
+        for i in 0..batch_size {
+            let id = ids.int64_value(&[i]);
+            labels.push(common::id2label(id as u8));
+        }
+
+        labels
+    }
 }
 
 impl TransformerSequenceClassificationModel for RobertaForSequenceClassification {
