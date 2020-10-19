@@ -13,9 +13,13 @@ use crate::tokenization::{load_tokenizer, PAD_TOKEN_ID};
 
 #[derive(Debug)]
 pub struct Batch {
+    /// Shape: (batch_size, sequence length)
     pub token_ids: Tensor,
+    /// Shape: (batch_size, sequence length)
     pub type_ids: Tensor,
+    /// Shape: (batch_size,)
     pub gold_labels: Option<Tensor>,
+    /// Shape: (batch_size, sequence length)
     pub mask: Tensor,
 }
 
@@ -137,6 +141,16 @@ pub struct Instance {
     gold_label: Option<String>,
 }
 
+impl Instance {
+    pub fn new(premise: &str, hypothesis: &str, gold_label: Option<&str>) -> Self {
+        Self {
+            premise: premise.into(),
+            hypothesis: hypothesis.into(),
+            gold_label: gold_label.map(String::from),
+        }
+    }
+}
+
 pub struct Reader {
     pub tokenizer: RobertaTokenizer,
     pub max_sequence_length: usize,
@@ -152,6 +166,17 @@ impl Reader {
             max_sequence_length: 512,
             n_workers: num_cpus::get(),
         })
+    }
+
+    pub fn encode_instance(&self, instance: &Instance) -> Batch {
+        let inputs = self.tokenizer.encode(
+            &instance.premise,
+            Some(&instance.hypothesis),
+            self.max_sequence_length,
+            &self.truncation_strategy,
+            0,
+        );
+        Batch::from_tokenized_input(&inputs, instance.gold_label.as_deref())
     }
 
     pub fn read(&self, path: &str) -> Result<Vec<Batch>> {
@@ -208,16 +233,7 @@ impl Reader {
                     // invalid instance, skip.
                 }
                 _ => {
-                    let inputs = self.tokenizer.encode(
-                        &instance.premise,
-                        Some(&instance.hypothesis),
-                        self.max_sequence_length,
-                        &self.truncation_strategy,
-                        0,
-                    );
-                    let batch =
-                        Batch::from_tokenized_input(&inputs, instance.gold_label.as_deref());
-
+                    let batch = self.encode_instance(&instance);
                     tx_batch
                         .send(batch)
                         .expect("Failed to send batch through channel");

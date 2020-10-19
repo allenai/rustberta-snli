@@ -2,7 +2,6 @@ use anyhow::Result;
 use cached_path::{self, cached_path_with_options};
 use env_logger::Env;
 use log::info;
-use rust_tokenizers::tokenizer::{Tokenizer, TruncationStrategy};
 use structopt::StructOpt;
 use tch::Device;
 
@@ -10,17 +9,18 @@ pub(crate) mod common;
 pub mod data;
 pub mod modeling;
 pub mod tokenization;
+pub mod training;
 
-use data::{Batch, Reader};
+use data::{Instance, Reader};
 use modeling::Model;
+use training::Trainer;
 
 const TRANSFORMER_MODEL: &str =
     "https://storage.googleapis.com/allennlp-public-models/rustberta.tar.gz";
+
 const TRAIN_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_train.jsonl";
 const DEV_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_dev.jsonl";
 // const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
-const MAX_SEQUENCE_LENGTH: usize = 512;
-const TRUNCATION_STRATEGY: TruncationStrategy = TruncationStrategy::LongestFirst;
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -31,7 +31,7 @@ fn main() -> Result<()> {
     match opt.cmd {
         RustBERTaCmd::Train => {
             info!("Training RustBERTa on SNLI");
-            train(&reader)?;
+            train(&reader, &model)?;
         }
         RustBERTaCmd::Evaluate => {
             info!("Evaluating RustBERTa on SNLI");
@@ -65,7 +65,7 @@ fn load_components(model_resource_dir: &str) -> Result<(Reader, Model)> {
     Ok((reader, model))
 }
 
-fn train(reader: &Reader) -> Result<()> {
+fn train(reader: &Reader, model: &Model) -> Result<()> {
     info!("Reading dev data");
     let dev_data_path = cached_path::cached_path(DEV_PATH)?;
     let dev_data = reader.read(dev_data_path.to_str().unwrap())?;
@@ -76,19 +76,20 @@ fn train(reader: &Reader) -> Result<()> {
     let train_data = reader.read(train_data_path.to_str().unwrap())?;
     info!("Read {} instances", train_data.len());
 
+    let trainer = Trainer::builder(model, train_data)
+        .validation_data(dev_data)
+        .build()?;
+
+    info!("Starting training");
+    let result = trainer.train()?;
+    info!("Finished training: {:?}", result);
+
     Ok(())
 }
 
 fn predict(reader: &Reader, model: &Model, premise: &str, hypothesis: &str) -> Result<()> {
     info!("Tokenizing premise and hypothesis");
-    let inputs = reader.tokenizer.encode(
-        premise,
-        Some(hypothesis),
-        MAX_SEQUENCE_LENGTH,
-        &TRUNCATION_STRATEGY,
-        0,
-    );
-    let batch = Batch::from_tokenized_input(&inputs, None).to_device(model.device);
+    let batch = reader.encode_instance(&Instance::new(premise, hypothesis, None));
 
     info!("Running forward pass");
     let labels = model.predict(batch);

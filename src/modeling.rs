@@ -12,6 +12,7 @@ use crate::data::Batch;
 pub struct Model {
     pub classifier: RobertaForSequenceClassification,
     pub device: tch::Device,
+    pub vs: nn::VarStore,
 }
 
 impl Model {
@@ -44,7 +45,11 @@ impl Model {
         let classifier = RobertaForSequenceClassification::new(&vs.root(), &config);
         vs.load_partial(weights_path)?;
 
-        Ok(Model { classifier, device })
+        Ok(Model {
+            classifier,
+            device,
+            vs,
+        })
     }
 
     pub fn forward_on_batch(&self, b: Batch) -> Tensor {
@@ -52,6 +57,18 @@ impl Model {
             self.classifier
                 .forward_t(Some(b.token_ids), None, Some(b.type_ids), None, None, false);
         result.logits
+    }
+
+    pub fn forward_loss(&self, mut b: Batch) -> (Tensor, Tensor) {
+        let labels = b
+            .gold_labels
+            .take()
+            .expect("Batch must have gold labels to calculate loss");
+        let logits = self.forward_on_batch(b);
+        (
+            logits.cross_entropy_for_logits(&labels),
+            logits.accuracy_for_logits(&labels),
+        )
     }
 
     pub fn predict(&self, b: Batch) -> Vec<&'static str> {
