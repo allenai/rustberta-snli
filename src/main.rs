@@ -11,7 +11,8 @@ pub mod data;
 pub mod modeling;
 pub mod tokenization;
 
-use crate::modeling::TransformerSequenceClassificationModel;
+use data::{Batch, Reader};
+use modeling::Model;
 
 const TRANSFORMER_MODEL: &str =
     "https://storage.googleapis.com/allennlp-public-models/rustberta.tar.gz";
@@ -25,35 +26,46 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let opt = RustBERTaOpt::from_args();
 
-    match opt {
-        RustBERTaOpt::Train => {
+    let (reader, model) = load_components(TRANSFORMER_MODEL)?;
+
+    match opt.cmd {
+        RustBERTaCmd::Train => {
             info!("Training RustBERTa on SNLI");
-            train()?;
+            train(&reader)?;
         }
-        RustBERTaOpt::Evaluate => {
+        RustBERTaCmd::Evaluate => {
             info!("Evaluating RustBERTa on SNLI");
         }
-        RustBERTaOpt::Predict {
+        RustBERTaCmd::Predict {
             premise,
             hypothesis,
         } => {
-            predict(&premise, &hypothesis)?;
+            predict(&reader, &model, &premise, &hypothesis)?;
         }
     };
 
     Ok(())
 }
 
-fn train() -> Result<()> {
-    info!("Caching pretrained transformer model");
-    let model_resource_dir = cached_path_with_options(
-        TRANSFORMER_MODEL,
+fn load_components(model_resource_dir: &str) -> Result<(Reader, Model)> {
+    info!("Caching model resources");
+    let local_model_resource_dir = cached_path_with_options(
+        model_resource_dir,
         &cached_path::Options::default().extract(),
     )?;
 
     info!("Loading tokenizer and reader");
-    let reader = data::Reader::new(&model_resource_dir.to_str().unwrap())?;
+    let reader = Reader::new(&local_model_resource_dir.to_str().unwrap())?;
 
+    let device = Device::cuda_if_available();
+
+    info!("Loading model to {:?}", device);
+    let model = Model::load(&local_model_resource_dir, device)?;
+
+    Ok((reader, model))
+}
+
+fn train(reader: &Reader) -> Result<()> {
     info!("Reading dev data");
     let dev_data_path = cached_path::cached_path(DEV_PATH)?;
     let dev_data = reader.read(dev_data_path.to_str().unwrap())?;
@@ -67,31 +79,16 @@ fn train() -> Result<()> {
     Ok(())
 }
 
-fn predict(premise: &str, hypothesis: &str) -> Result<()> {
-    info!("Caching pretrained transformer model");
-    let model_resource_dir = cached_path_with_options(
-        TRANSFORMER_MODEL,
-        &cached_path::Options::default().extract(),
-    )?;
-
-    let device = Device::cuda_if_available();
-    info!("Running on {:?}", device);
-
-    info!("Loading tokenizer");
-    let tokenizer = tokenization::load_tokenizer(&model_resource_dir)?;
-
-    info!("Loading model");
-    let model = modeling::load_model(&model_resource_dir, device)?;
-
+fn predict(reader: &Reader, model: &Model, premise: &str, hypothesis: &str) -> Result<()> {
     info!("Tokenizing premise and hypothesis");
-    let inputs = tokenizer.encode(
+    let inputs = reader.tokenizer.encode(
         premise,
         Some(hypothesis),
         MAX_SEQUENCE_LENGTH,
         &TRUNCATION_STRATEGY,
         0,
     );
-    let batch = data::Batch::from_tokenized_input(&inputs, None).to_device(device);
+    let batch = Batch::from_tokenized_input(&inputs, None).to_device(model.device);
 
     info!("Running forward pass");
     let labels = model.predict(batch);
@@ -106,8 +103,23 @@ fn predict(premise: &str, hypothesis: &str) -> Result<()> {
     about = "Train or evaluate a RoBERTa SNLI model",
     setting = structopt::clap::AppSettings::ColoredHelp,
 )]
-enum RustBERTaOpt {
+struct RustBERTaOpt {
+    #[structopt(short = "m", long = "model", name = "path", default_value = TRANSFORMER_MODEL)]
+    /// The path to the model resource directory.
+    resource_dir: String,
+
+    #[structopt(subcommand)]
+    cmd: RustBERTaCmd,
+}
+
+#[derive(Debug, StructOpt)]
+enum RustBERTaCmd {
+    /// Train or fine-tune a new model on SNLI.
     Train,
+
+    /// Evaluate a trained model on an SNLI dataset.
     Evaluate,
+
+    /// Predict whether a premise and hypothesis exhibit entailment, contradiction, or neutrality.
     Predict { premise: String, hypothesis: String },
 }

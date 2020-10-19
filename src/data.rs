@@ -138,10 +138,10 @@ pub struct Instance {
 }
 
 pub struct Reader {
-    tokenizer: RobertaTokenizer,
-    max_sequence_length: usize,
-    truncation_strategy: TruncationStrategy,
-    n_workers: usize,
+    pub tokenizer: RobertaTokenizer,
+    pub max_sequence_length: usize,
+    pub truncation_strategy: TruncationStrategy,
+    pub n_workers: usize,
 }
 
 impl Reader {
