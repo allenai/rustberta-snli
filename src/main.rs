@@ -22,7 +22,7 @@ const MAX_SEQUENCE_LENGTH: usize = 512;
 const TRUNCATION_STRATEGY: TruncationStrategy = TruncationStrategy::LongestFirst;
 
 fn main() -> Result<()> {
-    env_logger::from_env(Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let opt = RustBERTaOpt::from_args();
 
     match opt {
