@@ -1568,7 +1568,7 @@ dependencies = [
 [[package]]
 name = "rust_tokenizers"
 version = "6.0.0"
-source = "git+https://github.com/guillaume-be/rust-tokenizers?branch=master#4dfaf42b0719056101fa3448796c750303498c5a"
+source = "git+https://github.com/guillaume-be/rust-tokenizers?branch=master#9e890527d5ba33513af76b98e18032c4e4fb61f2"
 dependencies = [
  "csv",
  "hashbrown 0.7.2",
