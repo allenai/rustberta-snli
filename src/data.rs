@@ -31,7 +31,8 @@ impl Batch {
             type_ids: Tensor::of_slice(type_ids)
                 .totype(tch::Kind::Int64)
                 .unsqueeze(0),
-            gold_labels: gold_label.map(|label| Tensor::from(label).unsqueeze(0)),
+            gold_labels: gold_label
+                .map(|label| Tensor::from(label).totype(tch::Kind::Int64).unsqueeze(0)),
             mask: Tensor::of_slice(&vec![1; token_ids.len()]).unsqueeze(0),
         }
     }
@@ -156,8 +157,8 @@ pub struct Reader {
     pub tokenizer: RobertaTokenizer,
     pub max_sequence_length: usize,
     pub truncation_strategy: TruncationStrategy,
-    pub num_workers: usize,
     pub max_instances: Option<usize>,
+    num_workers: usize,
     is_done: RwLock<bool>,
 }
 
@@ -167,7 +168,7 @@ impl Reader {
             tokenizer: load_tokenizer(model_resource_dir)?,
             truncation_strategy: TruncationStrategy::LongestFirst,
             max_sequence_length: 512,
-            num_workers: num_cpus::get(),
+            num_workers: std::cmp::min(4, num_cpus::get()),
             max_instances: None,
             is_done: RwLock::new(false),
         })
@@ -187,62 +188,68 @@ impl Reader {
     pub fn read(&self, path: &str) -> Result<Vec<Batch>> {
         self.mark_done(false);
 
-        let (tx_line, rx_line) = flume::unbounded::<String>();
-        let (tx_batch, rx_batch) = flume::unbounded::<Batch>();
+        let (tx, rx) = flume::unbounded::<Batch>();
+        let path = String::from(path);
 
         thread::scope(|s| {
             let mut workers: Vec<thread::ScopedJoinHandle<_>> =
                 Vec::with_capacity(self.num_workers);
+
             for i in 0..self.num_workers {
-                let rx_line = rx_line.clone();
-                let tx_batch = tx_batch.clone();
+                let tx = tx.clone();
+                let path = path.clone();
                 let handle = s.spawn(move |_| {
                     debug!("Worker[{}] initialized", i);
-                    self.process_lines(rx_line, tx_batch);
+
+                    let file = File::open(path).expect("Failed to read file");
+                    let lines = io::BufReader::new(file).lines();
+                    for (n, line) in lines.skip(i).step_by(self.num_workers).enumerate() {
+                        if let Some(max_instances) = self.max_instances {
+                            if n * self.num_workers >= max_instances {
+                                // We might be done.
+                                if *self.is_done.read().expect("Failed to get read lock") {
+                                    break;
+                                }
+                            }
+                        }
+
+                        let line = line.expect("IO error reading line");
+                        let instance: Instance =
+                            serde_json::from_str(&line).expect("Failed to deserialize instance");
+
+                        match instance.gold_label.as_deref() {
+                            Some("-") => {
+                                // invalid instance, skip.
+                            }
+                            _ => {
+                                let batch = self.encode_instance(&instance);
+                                tx.send(batch).ok();
+                            }
+                        };
+                    }
+
                     debug!("Worker[{}] finished", i);
                 });
                 workers.push(handle);
             }
 
-            let path = String::from(path);
-            let producer = s.spawn(move |_| {
-                debug!("Line producer initialized");
-                let file = File::open(path).expect("Failed to read file");
-                let lines = io::BufReader::new(file).lines();
-                for (i, line) in lines.enumerate() {
-                    if let Some(max_instances) = self.max_instances {
-                        if i >= max_instances {
-                            // We might be done.
-                            if *self.is_done.read().expect("Failed to get read lock") {
-                                break;
-                            }
-                        }
-                    }
-                    let line = line.expect("IO error reading line");
-                    tx_line.send(line).expect("Failed sending line to worker");
-                }
-                debug!("Line producer finished");
-            });
-
-            drop(tx_batch);
+            drop(tx);
 
             debug!("Collecting instances from workers");
             let progress_bar = common::new_progress_bar();
             let data: Vec<Batch>;
             if let Some(max_instances) = self.max_instances {
                 data = progress_bar
-                    .wrap_iter(rx_batch.iter().take(max_instances))
+                    .wrap_iter(rx.iter().take(max_instances))
                     .collect();
                 self.mark_done(true);
-                drop(rx_batch);
+                drop(rx);
             } else {
-                data = progress_bar.wrap_iter(rx_batch.iter()).collect();
+                data = progress_bar.wrap_iter(rx.iter()).collect();
             }
             progress_bar.finish_at_current_pos();
 
-            debug!("Finished, waiting for producer to shutdown");
-            producer.join().expect("The producer has panicked");
-            debug!("Waiting for workers to shutdown");
+            debug!("Finished, waiting for workers to shutdown");
             for worker in workers {
                 worker.join().expect("The worker has panicked");
             }
@@ -256,28 +263,6 @@ impl Reader {
     fn mark_done(&self, is_done: bool) {
         let mut done = self.is_done.write().expect("Faild to get write lock");
         *done = is_done;
-    }
-
-    fn process_lines(&self, rx_line: flume::Receiver<String>, tx_batch: flume::Sender<Batch>) {
-        let mut n = 0;
-        rx_line.iter().for_each(|line| {
-            let instance: Instance =
-                serde_json::from_str(&line).expect("Failed to deserialize instance");
-            match instance.gold_label.as_deref() {
-                Some("-") => {
-                    // invalid instance, skip.
-                }
-                _ => {
-                    n += 1;
-                    let batch = self.encode_instance(&instance);
-                    tx_batch.send(batch).ok();
-                }
-            };
-        });
-        debug!(
-            "Worker finished processing lines, generated {} instances",
-            n
-        );
     }
 }
 

@@ -92,11 +92,11 @@ where
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
 
-            debug!("Backward pass");
+            debug!("Backward pass {:?}", batch_loss);
             self.optimizer.backward_step(&batch_loss);
 
-            train_loss_total += batch_loss.f_double_value(&[0]).unwrap();
-            train_acc_total += batch_acc.f_double_value(&[0]).unwrap();
+            train_loss_total += batch_loss.double_value(&[]);
+            train_acc_total += batch_acc.double_value(&[]);
         }
 
         let train_loss = train_loss_total / (self.train_data.len() as f64);
