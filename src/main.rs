@@ -20,21 +20,21 @@ const TRANSFORMER_MODEL: &str =
 
 const TRAIN_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_train.jsonl";
 const DEV_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_dev.jsonl";
-// const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
+const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let opt = RustBERTaOpt::from_args();
 
-    let (reader, model) = load_components(TRANSFORMER_MODEL)?;
+    let (reader, model) = load_components(&opt)?;
 
     match opt.cmd {
         RustBERTaCmd::Train => {
             info!("Training RustBERTa on SNLI");
             train(&reader, &model)?;
         }
-        RustBERTaCmd::Evaluate => {
-            info!("Evaluating RustBERTa on SNLI");
+        RustBERTaCmd::Evaluate { path } => {
+            info!("Evaluating RustBERTa on {}", path);
         }
         RustBERTaCmd::Predict {
             premise,
@@ -47,15 +47,18 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn load_components(model_resource_dir: &str) -> Result<(Reader, Model)> {
+fn load_components(opt: &RustBERTaOpt) -> Result<(Reader, Model)> {
     info!("Caching model resources");
     let local_model_resource_dir = cached_path_with_options(
-        model_resource_dir,
+        &opt.resource_dir,
         &cached_path::Options::default().extract(),
     )?;
 
     info!("Loading tokenizer and reader");
-    let reader = Reader::new(&local_model_resource_dir.to_str().unwrap())?;
+    let mut reader = Reader::new(&local_model_resource_dir.to_str().unwrap())?;
+    if let Some(max_instances) = opt.max_instances {
+        reader.max_instances = Some(max_instances);
+    }
 
     let device = Device::cuda_if_available();
 
@@ -109,6 +112,10 @@ struct RustBERTaOpt {
     /// The path to the model resource directory.
     resource_dir: String,
 
+    #[structopt(short = "n")]
+    /// The maximum number of instances to read.
+    max_instances: Option<usize>,
+
     #[structopt(subcommand)]
     cmd: RustBERTaCmd,
 }
@@ -119,7 +126,11 @@ enum RustBERTaCmd {
     Train,
 
     /// Evaluate a trained model on an SNLI dataset.
-    Evaluate,
+    Evaluate {
+        #[structopt(short = "p", long = "path", name = "path", default_value = TEST_PATH)]
+        /// The path to the data file.
+        path: String,
+    },
 
     /// Predict whether a premise and hypothesis exhibit entailment, contradiction, or neutrality.
     Predict { premise: String, hypothesis: String },
