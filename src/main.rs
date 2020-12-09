@@ -59,6 +59,9 @@ fn load_components(opt: &RustBERTaOpt) -> Result<(Reader, Model)> {
     if let Some(max_instances) = opt.max_instances {
         reader.max_instances = Some(max_instances);
     }
+    if let Some(num_workers) = opt.num_workers {
+        reader.num_workers = num_workers;
+    }
 
     let device = Device::cuda_if_available();
 
@@ -95,7 +98,7 @@ fn predict(reader: &Reader, model: &Model, premise: &str, hypothesis: &str) -> R
     let batch = reader.encode_instance(&Instance::new(premise, hypothesis, None));
 
     info!("Running forward pass");
-    let labels = model.predict(batch);
+    let labels = model.predict(batch.to_device(model.device));
     println!("Best prediction: {}", labels[0]);
 
     Ok(())
@@ -112,9 +115,13 @@ struct RustBERTaOpt {
     /// The path to the model resource directory.
     resource_dir: String,
 
-    #[structopt(short = "n")]
+    #[structopt(long = "max-instances")]
     /// The maximum number of instances to read.
     max_instances: Option<usize>,
+
+    #[structopt(long = "num-workers")]
+    /// The number of data loading workers to use.
+    num_workers: Option<usize>,
 
     #[structopt(subcommand)]
     cmd: RustBERTaCmd,

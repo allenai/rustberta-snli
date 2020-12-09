@@ -1,7 +1,7 @@
 use crate::data::Batch;
 use crate::modeling::Model;
 use anyhow::Result;
-use log::info;
+use log::{debug, info};
 use rand::seq::SliceRandom;
 use tch::{nn, no_grad};
 
@@ -82,14 +82,17 @@ where
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
 
+        info!("Training");
         for batch in self
             .train_data
             .chunks(self.batch_size as usize)
             .map(Batch::combine)
         {
+            debug!("Forward pass {:?}", batch);
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
 
+            debug!("Backward pass");
             self.optimizer.backward_step(&batch_loss);
 
             train_loss_total += batch_loss.f_double_value(&[0]).unwrap();
@@ -98,7 +101,9 @@ where
 
         let train_loss = train_loss_total / (self.train_data.len() as f64);
         let train_acc = train_acc_total / (self.train_data.len() as f64);
+        info!("Train loss {}, train accuracy {}", train_loss, train_acc);
 
+        info!("Validating");
         if self.validation_data.is_none() {
             return EpochResult {
                 train_loss,

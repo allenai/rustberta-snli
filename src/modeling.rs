@@ -1,4 +1,5 @@
 use anyhow::Result;
+use log::debug;
 use rust_bert::bert::BertConfig;
 use rust_bert::roberta::RobertaForSequenceClassification;
 use rust_bert::Config;
@@ -65,6 +66,7 @@ impl Model {
             .take()
             .expect("Batch must have gold labels to calculate loss");
         let logits = self.forward_on_batch(b);
+        debug!("logits: {:?}", logits);
         (
             logits.cross_entropy_for_logits(&labels),
             logits.accuracy_for_logits(&labels),

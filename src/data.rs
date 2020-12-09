@@ -156,7 +156,7 @@ pub struct Reader {
     pub tokenizer: RobertaTokenizer,
     pub max_sequence_length: usize,
     pub truncation_strategy: TruncationStrategy,
-    pub n_workers: usize,
+    pub num_workers: usize,
     pub max_instances: Option<usize>,
     is_done: RwLock<bool>,
 }
@@ -167,7 +167,7 @@ impl Reader {
             tokenizer: load_tokenizer(model_resource_dir)?,
             truncation_strategy: TruncationStrategy::LongestFirst,
             max_sequence_length: 512,
-            n_workers: num_cpus::get(),
+            num_workers: num_cpus::get(),
             max_instances: None,
             is_done: RwLock::new(false),
         })
@@ -191,12 +191,13 @@ impl Reader {
         let (tx_batch, rx_batch) = flume::unbounded::<Batch>();
 
         thread::scope(|s| {
-            let mut workers: Vec<thread::ScopedJoinHandle<_>> = Vec::with_capacity(self.n_workers);
-            for i in 0..self.n_workers {
+            let mut workers: Vec<thread::ScopedJoinHandle<_>> =
+                Vec::with_capacity(self.num_workers);
+            for i in 0..self.num_workers {
                 let rx_line = rx_line.clone();
                 let tx_batch = tx_batch.clone();
                 let handle = s.spawn(move |_| {
-                    debug!("Worker[{}] initializing", i);
+                    debug!("Worker[{}] initialized", i);
                     self.process_lines(rx_line, tx_batch);
                     debug!("Worker[{}] finished", i);
                 });
@@ -205,6 +206,7 @@ impl Reader {
 
             let path = String::from(path);
             let producer = s.spawn(move |_| {
+                debug!("Line producer initialized");
                 let file = File::open(path).expect("Failed to read file");
                 let lines = io::BufReader::new(file).lines();
                 for (i, line) in lines.enumerate() {
@@ -219,10 +221,12 @@ impl Reader {
                     let line = line.expect("IO error reading line");
                     tx_line.send(line).expect("Failed sending line to worker");
                 }
+                debug!("Line producer finished");
             });
 
             drop(tx_batch);
 
+            debug!("Collecting instances from workers");
             let progress_bar = common::new_progress_bar();
             let data: Vec<Batch>;
             if let Some(max_instances) = self.max_instances {
@@ -236,10 +240,13 @@ impl Reader {
             }
             progress_bar.finish_at_current_pos();
 
+            debug!("Finished, waiting for producer to shutdown");
             producer.join().expect("The producer has panicked");
+            debug!("Waiting for workers to shutdown");
             for worker in workers {
                 worker.join().expect("The worker has panicked");
             }
+            debug!("Done!");
 
             Ok(data)
         })
@@ -252,6 +259,7 @@ impl Reader {
     }
 
     fn process_lines(&self, rx_line: flume::Receiver<String>, tx_batch: flume::Sender<Batch>) {
+        let mut n = 0;
         rx_line.iter().for_each(|line| {
             let instance: Instance =
                 serde_json::from_str(&line).expect("Failed to deserialize instance");
@@ -260,11 +268,16 @@ impl Reader {
                     // invalid instance, skip.
                 }
                 _ => {
+                    n += 1;
                     let batch = self.encode_instance(&instance);
                     tx_batch.send(batch).ok();
                 }
             };
         });
+        debug!(
+            "Worker finished processing lines, generated {} instances",
+            n
+        );
     }
 }
 
@@ -306,7 +319,7 @@ mod tests {
     fn test_reader() {
         let mut reader = Reader::new("test_fixtures/tokenizer").unwrap();
         // Set 1 worker so the order is deterministic.
-        reader.n_workers = 1;
+        reader.num_workers = 1;
 
         let mut data = reader.read("test_fixtures/snli.jsonl").unwrap();
 
