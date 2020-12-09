@@ -1,7 +1,8 @@
+use crate::common;
 use crate::data::Batch;
 use crate::modeling::Model;
 use anyhow::Result;
-use log::{debug, info};
+use log::info;
 use rand::seq::SliceRandom;
 use tch::{nn, no_grad};
 
@@ -77,33 +78,48 @@ where
     }
 
     fn train_epoch(&mut self) -> EpochResult {
+        info!("Training");
+
         self.train_data.shuffle(&mut self.rng);
 
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
+        let num_batches = self.train_data.len() / self.batch_size as usize;
+        let train_bar = common::new_progress_bar(num_batches);
 
-        info!("Training");
         for batch in self
             .train_data
             .chunks(self.batch_size as usize)
             .map(Batch::combine)
         {
-            debug!("Forward pass {:?}", batch);
+            self.optimizer.zero_grad();
+
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
 
-            debug!("Backward pass {:?}", batch_loss);
             self.optimizer.backward_step(&batch_loss);
 
-            train_loss_total += batch_loss.double_value(&[]);
-            train_acc_total += batch_acc.double_value(&[]);
+            let batch_loss_float = batch_loss.double_value(&[]);
+            let batch_acc_float = batch_acc.double_value(&[]);
+            train_loss_total += batch_loss_float;
+            train_acc_total += batch_acc_float;
+
+            train_bar.inc(1);
+            train_bar.set_message(&format!(
+                "batch loss: {:.4}, batch acc: {:.4}",
+                batch_loss_float, batch_acc_float
+            ));
         }
+
+        train_bar.finish();
 
         let train_loss = train_loss_total / (self.train_data.len() as f64);
         let train_acc = train_acc_total / (self.train_data.len() as f64);
-        info!("Train loss {}, train accuracy {}", train_loss, train_acc);
+        info!(
+            "Train loss: {:.4}, train accuracy: {:.4}",
+            train_loss, train_acc
+        );
 
-        info!("Validating");
         if self.validation_data.is_none() {
             return EpochResult {
                 train_loss,
@@ -113,9 +129,12 @@ where
             };
         }
 
+        info!("Validating");
         let validation_data = self.validation_data.as_ref().unwrap();
         let mut validation_loss_total = 0.0;
         let mut validation_acc_total = 0.0;
+        let num_batches = validation_data.len() / self.batch_size as usize;
+        let validation_bar = common::new_progress_bar(num_batches);
 
         no_grad(|| {
             for batch in validation_data
@@ -125,10 +144,20 @@ where
                 let (batch_loss, batch_acc) =
                     self.model.forward_loss(batch.to_device(self.model.device));
 
-                validation_loss_total += batch_loss.f_double_value(&[0]).unwrap();
-                validation_acc_total += batch_acc.f_double_value(&[0]).unwrap();
+                let batch_loss_float = batch_loss.double_value(&[]);
+                let batch_acc_float = batch_acc.double_value(&[]);
+                validation_loss_total += batch_loss_float;
+                validation_acc_total += batch_acc_float;
+
+                validation_bar.inc(1);
+                validation_bar.set_message(&format!(
+                    "batch loss: {:.4}, batch acc: {:.4}",
+                    batch_loss_float, batch_acc_float
+                ));
             }
         });
+
+        validation_bar.finish();
 
         let validation_loss = validation_loss_total / (validation_data.len() as f64);
         let validation_acc = validation_acc_total / (validation_data.len() as f64);

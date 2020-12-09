@@ -16,12 +16,23 @@ pub(crate) fn id2label(id: u8) -> &'static str {
     }
 }
 
-pub(crate) fn new_progress_bar() -> indicatif::ProgressBar {
+pub(crate) fn new_spinner() -> indicatif::ProgressBar {
     let progress_bar = indicatif::ProgressBar::new_spinner().with_style(
         indicatif::ProgressStyle::default_spinner()
             .template("{pos} [{per_sec}, {elapsed}] {spinner}"),
     );
     progress_bar.set_draw_delta(1_117);
+    progress_bar
+}
+
+pub(crate) fn new_progress_bar(size: usize) -> indicatif::ProgressBar {
+    let progress_bar = indicatif::ProgressBar::new(size as u64).with_style(
+        indicatif::ProgressStyle::default_bar()
+            .template(
+                "[{elapsed_precise} < {eta}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%), {msg}",
+            )
+            .progress_chars("=> "),
+    );
     progress_bar
 }
 

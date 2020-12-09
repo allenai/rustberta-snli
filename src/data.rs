@@ -236,7 +236,7 @@ impl Reader {
             drop(tx);
 
             debug!("Collecting instances from workers");
-            let progress_bar = common::new_progress_bar();
+            let progress_bar = common::new_spinner();
             let data: Vec<Batch>;
             if let Some(max_instances) = self.max_instances {
                 data = progress_bar
