@@ -63,6 +63,21 @@ cargo run -- train --out weights.ot
 
 To get a new prediction with a fine-tuned model, run
 
-```
+```bash
 cargo run -- predict --weigths weights.ot
+```
+
+And to serve a fine-tuned model as a production-grade webservice with batched prediction, run
+
+```bash
+cargo run -- serve
+```
+
+This will serve on port 3030 by default. You can then test it out by running:
+
+```bash
+curl \
+    -d '{"premise":"A soccer game with multiple males playing.","hypothesis":"Some men are playing a sport."}' \
+    -H "Content-Type: application/json" \
+    http://localhost:3030/predict
 ```
