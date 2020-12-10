@@ -82,6 +82,7 @@ fn train(reader: &Reader, model: &Model, opt: &TrainOpts) -> Result<()> {
     let trainer = Trainer::builder(model, train_data)
         .lr(opt.lr)
         .warmup_steps(opt.warmup_steps)
+        .epochs(opt.epochs)
         .batch_size(opt.batch_size)
         .validation_data(dev_data)
         .build()?;
@@ -152,4 +153,8 @@ struct TrainOpts {
     #[structopt(long = "batch-size", name = "batch-size", default_value = "16")]
     /// The learning rate.
     batch_size: u32,
+
+    #[structopt(long = "epochs", name = "epochs", default_value = "3")]
+    /// The number of epochs to train for.
+    epochs: u32,
 }

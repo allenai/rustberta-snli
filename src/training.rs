@@ -47,6 +47,9 @@ where
             println!("");
         }
 
+        // TODO: make this path configurable.
+        self.model.vs.save("weights.th")?;
+
         // TODO:
         Ok(TrainResult {
             best_epoch: 0,
@@ -190,7 +193,7 @@ impl<'a> TrainerBuilder<'a, nn::AdamW> {
                 train_data,
                 validation_data: None,
                 batch_size: 32,
-                epochs: 10,
+                epochs: 3,
                 lr: 2e-5,
                 warmup_steps: 2000,
             },
