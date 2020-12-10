@@ -81,3 +81,9 @@ curl \
     -H "Content-Type: application/json" \
     http://localhost:3030/predict
 ```
+
+You can also test the batching functionality by sending a bunch of requests at once with:
+
+```bash
+./scripts/test_server.sh
+```
