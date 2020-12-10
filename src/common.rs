@@ -16,13 +16,30 @@ pub(crate) fn id2label(id: u8) -> &'static str {
     }
 }
 
-pub(crate) fn new_progress_bar() -> indicatif::ProgressBar {
+pub(crate) fn new_spinner() -> indicatif::ProgressBar {
     let progress_bar = indicatif::ProgressBar::new_spinner().with_style(
         indicatif::ProgressStyle::default_spinner()
             .template("{pos} [{per_sec}, {elapsed}] {spinner}"),
     );
     progress_bar.set_draw_delta(1_117);
     progress_bar
+}
+
+pub(crate) fn new_epoch_bar(
+    epoch: u32,
+    total_epochs: u32,
+    steps: usize,
+    train: bool,
+) -> indicatif::ProgressBar {
+    let template = match train {
+        true =>  "Training   [{elapsed_precise} < {eta}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+        false => "Validating [{elapsed_precise} < {eta}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+    };
+    indicatif::ProgressBar::new(steps as u64).with_style(
+        indicatif::ProgressStyle::default_bar()
+            .template(&format!("{}/{} {}", epoch + 1, total_epochs, template))
+            .progress_chars("=> "),
+    )
 }
 
 #[cfg(test)]

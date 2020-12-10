@@ -1,16 +1,20 @@
+use crate::common;
 use crate::data::Batch;
 use crate::modeling::Model;
 use anyhow::Result;
 use log::info;
 use rand::seq::SliceRandom;
+use std::path::{Path, PathBuf};
 use tch::{nn, no_grad};
 
-pub struct Trainer<'a, O>
+pub struct Trainer<'a, O, S>
 where
     O: nn::OptimizerConfig,
+    S: Scheduler,
 {
     // Model.
     model: &'a Model,
+    out: PathBuf,
 
     // Data.
     train_data: Vec<Batch>,
@@ -20,84 +24,134 @@ where
     epochs: u32,
     batch_size: u32,
     optimizer: nn::Optimizer<O>,
+    scheduler: S,
 
     // Other stuff.
     rng: rand::rngs::ThreadRng,
 }
 
-struct TrainerConfig<'a> {
-    model: &'a Model,
-    train_data: Vec<Batch>,
-    validation_data: Option<Vec<Batch>>,
-    batch_size: u32,
-    epochs: u32,
-    lr: f64,
-}
-
-#[derive(Debug)]
-pub struct TrainResult {
-    pub best_epoch: u32,
-    pub train_loss: f64,
-    pub best_validation_loss: Option<f64>,
-    pub best_validation_accuracy: Option<f64>,
-}
-
-#[derive(Debug)]
-struct EpochResult {
-    train_loss: f64,
-    train_acc: f64,
-    validation_loss: Option<f64>,
-    validation_acc: Option<f64>,
-}
-
-impl<'a> Trainer<'a, nn::Adam> {
-    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::Adam> {
-        TrainerBuilder::new(model, train_data)
-    }
-}
-
-impl<'a, O> Trainer<'a, O>
+impl<'a, O, S> Trainer<'a, O, S>
 where
     O: nn::OptimizerConfig,
+    S: Scheduler,
 {
     pub fn train(mut self) -> Result<TrainResult> {
+        let mut train_loss = 0.0;
+        let mut best_epoch = 0;
+        let mut best_epoch_loss = 0.0;
+        let mut best_epoch_acc = 0.0;
+        let mut epoch_results: Vec<EpochResult> = Vec::new();
+
         for epoch in 0..self.epochs {
-            info!("Starting epoch {}", epoch);
-            let epoch_result = self.train_epoch();
-            info!("Epoch finished: {:?}", epoch_result);
+            // Maybe update LR.
+            if let Some(lr) = self.scheduler.pre_epoch_step(epoch) {
+                self.optimizer.set_lr(lr);
+            }
+
+            let epoch_result = self.train_epoch(epoch);
+
+            // Update running best and potentially save a new checkpoint.
+            if let (Some(val_loss), Some(val_acc)) =
+                (epoch_result.validation_loss, epoch_result.validation_acc)
+            {
+                // This is always true for the first epoch, so we know we'll have at least
+                // one checkpoint.
+                if val_acc >= best_epoch_acc {
+                    info!("Best epoch so far, saving weights to {:?}", self.out);
+                    self.model.vs.save(&self.out)?;
+                    info!("Done!");
+
+                    train_loss = epoch_result.train_loss;
+                    best_epoch = epoch;
+                    best_epoch_loss = val_loss;
+                    best_epoch_acc = val_acc;
+                }
+            } else {
+                train_loss = epoch_result.train_loss;
+            }
+
+            epoch_results.push(epoch_result);
+
+            // Maybe update LR.
+            if let Some(lr) = self.scheduler.post_epoch_step(epoch) {
+                self.optimizer.set_lr(lr);
+            }
+
+            println!();
         }
 
-        // TODO:
+        if self.validation_data.is_none() {
+            info!("Saving trained weights to {:?}", self.out);
+            self.model.vs.save(&self.out)?;
+            info!("Done!");
+        }
+
         Ok(TrainResult {
-            best_epoch: 0,
-            train_loss: 0.0,
-            best_validation_loss: None,
-            best_validation_accuracy: None,
+            train_loss,
+            best_epoch: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch)
+            },
+            best_validation_loss: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch_loss)
+            },
+            best_validation_accuracy: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch_acc)
+            },
         })
     }
 
-    fn train_epoch(&mut self) -> EpochResult {
+    fn train_epoch(&mut self, epoch: u32) -> EpochResult {
         self.train_data.shuffle(&mut self.rng);
 
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
+        let num_batches = self.train_data.len() / self.batch_size as usize;
+        let train_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, true);
 
-        for batch in self
+        for (batch_num, batch) in self
             .train_data
             .chunks(self.batch_size as usize)
             .map(Batch::combine)
+            .enumerate()
         {
+            if let Some(lr) = self.scheduler.pre_batch_step(batch_num as u32) {
+                self.optimizer.set_lr(lr);
+            }
+
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
 
             self.optimizer.backward_step(&batch_loss);
 
-            train_loss_total += batch_loss.f_double_value(&[0]).unwrap();
-            train_acc_total += batch_acc.f_double_value(&[0]).unwrap();
+            let batch_loss_float = batch_loss.double_value(&[]);
+            let batch_acc_float = batch_acc.double_value(&[]);
+            train_loss_total += batch_loss_float;
+            train_acc_total += batch_acc_float * batch.size().0 as f64;
+
+            if let Some(lr) = self.scheduler.post_batch_step(batch_num as u32) {
+                self.optimizer.set_lr(lr);
+            }
+
+            train_bar.inc(1);
+            train_bar.set_message(&format!(
+                "batch loss: {:.4}, batch acc: {:.4}",
+                batch_loss_float / (self.batch_size as f64),
+                batch_acc_float
+            ));
         }
 
         let train_loss = train_loss_total / (self.train_data.len() as f64);
         let train_acc = train_acc_total / (self.train_data.len() as f64);
+        train_bar.finish_with_message(&format!(
+            "epoch train loss: {:.4}, epoch train acc: {:.4}",
+            train_loss, train_acc
+        ));
 
         if self.validation_data.is_none() {
             return EpochResult {
@@ -111,6 +165,8 @@ where
         let validation_data = self.validation_data.as_ref().unwrap();
         let mut validation_loss_total = 0.0;
         let mut validation_acc_total = 0.0;
+        let num_batches = validation_data.len() / self.batch_size as usize;
+        let validation_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, false);
 
         no_grad(|| {
             for batch in validation_data
@@ -120,13 +176,26 @@ where
                 let (batch_loss, batch_acc) =
                     self.model.forward_loss(batch.to_device(self.model.device));
 
-                validation_loss_total += batch_loss.f_double_value(&[0]).unwrap();
-                validation_acc_total += batch_acc.f_double_value(&[0]).unwrap();
+                let batch_loss_float = batch_loss.double_value(&[]);
+                let batch_acc_float = batch_acc.double_value(&[]);
+                validation_loss_total += batch_loss_float;
+                validation_acc_total += batch_acc_float * batch.size().0 as f64;
+
+                validation_bar.inc(1);
+                validation_bar.set_message(&format!(
+                    "batch loss: {:.4}, batch acc: {:.4}",
+                    batch_loss_float / (self.batch_size as f64),
+                    batch_acc_float
+                ));
             }
         });
 
         let validation_loss = validation_loss_total / (validation_data.len() as f64);
         let validation_acc = validation_acc_total / (validation_data.len() as f64);
+        validation_bar.finish_with_message(&format!(
+            "epoch valid loss: {:.4}, epoch valid acc: {:.4}",
+            validation_loss, validation_acc
+        ));
 
         EpochResult {
             train_loss,
@@ -135,6 +204,23 @@ where
             validation_acc: Some(validation_acc),
         }
     }
+}
+
+impl<'a> Trainer<'a, nn::AdamW, LinearSchedulerWithWarmup> {
+    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
+        TrainerBuilder::new(model, train_data)
+    }
+}
+
+struct TrainerConfig<'a> {
+    model: &'a Model,
+    out: PathBuf,
+    train_data: Vec<Batch>,
+    validation_data: Option<Vec<Batch>>,
+    batch_size: u32,
+    epochs: u32,
+    lr: f64,
+    warmup_steps: u32,
 }
 
 pub struct TrainerBuilder<'a, O>
@@ -147,18 +233,20 @@ where
     optimizer_config: O,
 }
 
-impl<'a> TrainerBuilder<'a, nn::Adam> {
-    pub fn new(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::Adam> {
+impl<'a> TrainerBuilder<'a, nn::AdamW> {
+    pub fn new(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
         Self {
             config: TrainerConfig {
                 model,
+                out: PathBuf::from("weights.ot"),
                 train_data,
                 validation_data: None,
-                batch_size: 8,
-                epochs: 10,
+                batch_size: 32,
+                epochs: 2,
                 lr: 2e-5,
+                warmup_steps: 1000,
             },
-            optimizer_config: nn::adam(0.9, 0.999, 0.1),
+            optimizer_config: nn::adamw(0.9, 0.999, 0.1),
         }
     }
 }
@@ -167,20 +255,36 @@ impl<'a, O> TrainerBuilder<'a, O>
 where
     O: nn::OptimizerConfig,
 {
-    pub fn build(self) -> Result<Trainer<'a, O>> {
+    pub fn build(self) -> Result<Trainer<'a, O, LinearSchedulerWithWarmup>> {
         let optimizer = self
             .optimizer_config
             .build(&self.config.model.vs, self.config.lr)?;
 
+        let scheduler = LinearSchedulerWithWarmup {
+            warmup_steps: self.config.warmup_steps,
+            total_steps: (self.config.train_data.len() as u32 / self.config.batch_size)
+                * self.config.epochs,
+            steps: 0,
+            base_lr: self.config.lr,
+            end_lr: 0.0,
+        };
+
         Ok(Trainer {
             model: self.config.model,
+            out: self.config.out,
             train_data: self.config.train_data,
             validation_data: self.config.validation_data,
             batch_size: self.config.batch_size,
             epochs: self.config.epochs,
             optimizer,
+            scheduler,
             rng: rand::thread_rng(),
         })
+    }
+
+    pub fn out_path<P: AsRef<Path>>(mut self, out: P) -> Self {
+        self.config.out = out.as_ref().into();
+        self
     }
 
     pub fn validation_data(mut self, validation_data: Vec<Batch>) -> Self {
@@ -203,6 +307,11 @@ where
         self
     }
 
+    pub fn warmup_steps(mut self, warmup_steps: u32) -> Self {
+        self.config.warmup_steps = warmup_steps;
+        self
+    }
+
     pub fn optimizer<U>(self, optimizer_config: U) -> TrainerBuilder<'a, U>
     where
         U: nn::OptimizerConfig,
@@ -212,4 +321,63 @@ where
             optimizer_config,
         }
     }
+}
+
+pub trait Scheduler {
+    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        None
+    }
+
+    fn post_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        None
+    }
+
+    fn pre_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+        None
+    }
+
+    fn post_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+        None
+    }
+}
+
+pub struct LinearSchedulerWithWarmup {
+    warmup_steps: u32,
+    total_steps: u32,
+    steps: u32,
+    base_lr: f64,
+    end_lr: f64,
+}
+
+impl Scheduler for LinearSchedulerWithWarmup {
+    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        self.steps += 1;
+        let lr = if self.steps < self.warmup_steps {
+            self.base_lr * (self.steps as f64 / self.warmup_steps as f64)
+        } else if self.steps > self.total_steps {
+            self.end_lr
+        } else {
+            let current_decay_steps = self.total_steps - self.steps;
+            let total_decay_steps = self.total_steps - self.warmup_steps;
+            let factor = current_decay_steps as f64 / total_decay_steps as f64;
+            factor * (self.base_lr - self.end_lr) + self.end_lr
+        };
+        Some(lr)
+    }
+}
+
+#[derive(Debug)]
+pub struct TrainResult {
+    pub train_loss: f64,
+    pub best_epoch: Option<u32>,
+    pub best_validation_loss: Option<f64>,
+    pub best_validation_accuracy: Option<f64>,
+}
+
+#[derive(Debug)]
+struct EpochResult {
+    train_loss: f64,
+    train_acc: f64,
+    validation_loss: Option<f64>,
+    validation_acc: Option<f64>,
 }
