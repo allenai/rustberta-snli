@@ -1,7 +1,8 @@
 use anyhow::Result;
 use cached_path::{self, cached_path_with_options};
 use env_logger::Env;
-use log::info;
+use log::{info, warn};
+use std::io::{stdin, stdout, Write};
 use structopt::StructOpt;
 use tch::Device;
 
@@ -17,6 +18,8 @@ use training::Trainer;
 
 const PRETRAINED_MODEL: &str =
     "https://storage.googleapis.com/allennlp-public-models/rustberta.tar.gz";
+const FINE_TUNED_MODEL: &str =
+    "https://storage.googleapis.com/allennlp-public-models/rustberta-snli.ot";
 const TRAIN_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_train.jsonl";
 const DEV_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_dev.jsonl";
 // const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
@@ -32,11 +35,8 @@ fn main() -> Result<()> {
             info!("Training RustBERTa on SNLI");
             train(reader, model, &train_opts)?;
         }
-        RustBERTaCmd::Predict {
-            premise,
-            hypothesis,
-        } => {
-            predict(reader, model, &premise, &hypothesis)?;
+        RustBERTaCmd::Predict => {
+            predict(reader, model)?;
         }
     };
 
@@ -45,28 +45,33 @@ fn main() -> Result<()> {
 
 fn load_components(opt: &RustBERTaOpt) -> Result<(Reader, Model)> {
     let weights_path = match &opt.weights {
-        Some(weights_path) => weights_path.clone(),
-        None => {
-            info!("Caching pretrained model");
-            let pretrained_model_dir = cached_path_with_options(
-                PRETRAINED_MODEL,
-                &cached_path::Options::default().extract(),
-            )?;
-            pretrained_model_dir
-                .join("model.ot")
-                .to_str()
-                .unwrap()
-                .into()
-        }
+        Some(weights_path) => cached_path::cached_path(weights_path)?,
+        None => match opt.cmd {
+            RustBERTaCmd::Train(_) => {
+                info!("Caching pretrained model");
+                let pretrained_model_dir = cached_path_with_options(
+                    PRETRAINED_MODEL,
+                    &cached_path::Options::default().extract(),
+                )?;
+                pretrained_model_dir.join("model.ot")
+            }
+            _ => {
+                info!("Caching fine-tuned model");
+                cached_path::cached_path(FINE_TUNED_MODEL)?
+            }
+        },
     };
+    let vocab_path = cached_path::cached_path(&opt.vocab)?;
+    let merges_path = cached_path::cached_path(&opt.merges)?;
+    let config_path = cached_path::cached_path(&opt.config)?;
 
     info!("Loading tokenizer and reader");
-    let reader = Reader::new(&opt.vocab, &opt.merges)?;
+    let reader = Reader::new(&vocab_path, &merges_path)?;
 
     let device = Device::cuda_if_available();
 
     info!("Loading model to {:?}", device);
-    let model = Model::load(&opt.config, &weights_path, device)?;
+    let model = Model::load(&config_path, &weights_path, device)?;
 
     Ok((reader, model))
 }
@@ -99,13 +104,47 @@ fn train(mut reader: Reader, model: Model, opt: &TrainOpts) -> Result<()> {
     Ok(())
 }
 
-fn predict(reader: Reader, model: Model, premise: &str, hypothesis: &str) -> Result<()> {
-    info!("Tokenizing premise and hypothesis");
-    let batch = reader.encode_instance(&Instance::new(premise, hypothesis, None));
+fn predict(reader: Reader, model: Model) -> Result<()> {
+    println!("Starting interactive session, press 'q' or CTRL-C at any time to quit.");
 
-    info!("Running forward pass");
-    let labels = model.predict(batch.to_device(model.device));
-    println!("Best prediction: {}", labels[0]);
+    loop {
+        print!("Enter a premise: ");
+        let mut premise = String::new();
+        let _ = stdout().flush();
+        stdin().read_line(&mut premise)?;
+        premise = premise.trim().into();
+        if premise == "" {
+            warn!("You must enter something for the premise");
+            continue;
+        } else if premise == "q" {
+            println!("👋 See ya!");
+            break;
+        }
+
+        print!("Enter a hypothesis: ");
+        let mut hypothesis = String::new();
+        let _ = stdout().flush();
+        stdin().read_line(&mut hypothesis)?;
+        hypothesis = hypothesis.trim().into();
+        if hypothesis == "" {
+            warn!("You must enter something for the hypothesis");
+            continue;
+        } else if hypothesis == "q" {
+            println!("👋 See ya!");
+            break;
+        }
+
+        let batch = reader.encode_instance(&Instance::new(&premise, &hypothesis, None));
+        let labels = model.predict(batch.to_device(model.device));
+        let label = labels[0];
+        if label == "entailment" {
+            println!("✅ {}\n", label);
+        } else if label == "contradiction" {
+            println!("❌ {}\n", label);
+        } else {
+            println!("❓ {}\n", label);
+        }
+    }
 
     Ok(())
 }
@@ -144,8 +183,8 @@ enum RustBERTaCmd {
     Train(TrainOpts),
 
     #[structopt(setting = structopt::clap::AppSettings::ColoredHelp)]
-    /// Predict whether a premise and hypothesis exhibit entailment, contradiction, or neutrality.
-    Predict { premise: String, hypothesis: String },
+    /// (Interactive) Predict whether a premise and hypothesis exhibit entailment, contradiction, or neutrality.
+    Predict,
 }
 
 #[derive(Debug, StructOpt)]

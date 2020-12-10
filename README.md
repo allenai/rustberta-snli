@@ -64,7 +64,5 @@ cargo run -- train --out weights.ot
 To get a new prediction with a fine-tuned model, run
 
 ```
-cargo run -- predict --weigths weights.ot \
-    'An older and younger man smiling.' \
-    'Two men are smiling and laughing at the cats playing on the floor.'
+cargo run -- predict --weigths weights.ot
 ```
