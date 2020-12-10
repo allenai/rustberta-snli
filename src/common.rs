@@ -32,8 +32,8 @@ pub(crate) fn new_epoch_bar(
     train: bool,
 ) -> indicatif::ProgressBar {
     let template = match train {
-        true =>  "Training   [{elapsed_precise} < {eta}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
-        false => "Validating [{elapsed_precise} < {eta}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+        true =>  "Training   [{elapsed_precise} < {eta_precise}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+        false => "Validating [{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
     };
     indicatif::ProgressBar::new(steps as u64).with_style(
         indicatif::ProgressStyle::default_bar()
