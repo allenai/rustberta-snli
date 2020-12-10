@@ -35,12 +35,11 @@ pub(crate) fn new_epoch_bar(
         true =>  "Training   [{elapsed_precise} < {eta}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
         false => "Validating [{elapsed_precise} < {eta}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
     };
-    let progress_bar = indicatif::ProgressBar::new(steps as u64).with_style(
+    indicatif::ProgressBar::new(steps as u64).with_style(
         indicatif::ProgressStyle::default_bar()
             .template(&format!("{}/{} {}", epoch + 1, total_epochs, template))
             .progress_chars("=> "),
-    );
-    progress_bar
+    )
 }
 
 #[cfg(test)]
