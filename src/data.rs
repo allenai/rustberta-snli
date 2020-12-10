@@ -6,6 +6,7 @@ use rust_tokenizers::TokenizedInput;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, BufRead};
+use std::path::Path;
 use std::sync::RwLock;
 use tch::Tensor;
 
@@ -163,9 +164,9 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn new(model_resource_dir: &str) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(vocab_path: P, merges_path: P) -> Result<Self> {
         Ok(Reader {
-            tokenizer: load_tokenizer(model_resource_dir)?,
+            tokenizer: load_tokenizer(vocab_path, merges_path)?,
             truncation_strategy: TruncationStrategy::LongestFirst,
             max_sequence_length: 512,
             num_workers: std::cmp::min(4, num_cpus::get()),
@@ -302,7 +303,11 @@ mod tests {
 
     #[test]
     fn test_reader() {
-        let mut reader = Reader::new("test_fixtures/tokenizer").unwrap();
+        let mut reader = Reader::new(
+            "test_fixtures/tokenizer/vocab.txt",
+            "test_fixtures/tokenizer/merges.txt",
+        )
+        .unwrap();
         // Set 1 worker so the order is deterministic.
         reader.num_workers = 1;
 

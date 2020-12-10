@@ -4,13 +4,10 @@ use std::path::Path;
 
 pub const PAD_TOKEN_ID: i64 = 1;
 
-pub fn load_tokenizer<P: AsRef<Path>>(model_resource_dir: P) -> Result<RobertaTokenizer> {
-    let vocab_path = model_resource_dir.as_ref().join("vocab.txt");
-    let merges_path = model_resource_dir.as_ref().join("merges.txt");
-
+pub fn load_tokenizer<P: AsRef<Path>>(vocab_path: P, merges_path: P) -> Result<RobertaTokenizer> {
     Ok(RobertaTokenizer::from_file(
-        vocab_path.to_str().unwrap(),
-        merges_path.to_str().unwrap(),
+        vocab_path.as_ref().to_str().unwrap(),
+        merges_path.as_ref().to_str().unwrap(),
         false, // lowercase
         true,  // add prefix space
     )?)
@@ -24,7 +21,11 @@ mod tests {
 
     #[test]
     fn test_tokenizer() {
-        let tokenizer = load_tokenizer("test_fixtures/tokenizer").unwrap();
+        let tokenizer = load_tokenizer(
+            "test_fixtures/tokenizer/vocab.txt",
+            "test_fixtures/tokenizer/merges.txt",
+        )
+        .unwrap();
 
         // Make sure PAD_TOKEN_ID is correct.
         let pad_token = RobertaVocab::pad_value();

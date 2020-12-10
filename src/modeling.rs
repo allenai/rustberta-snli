@@ -16,10 +16,7 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn load(model_resource_dir: &Path, device: Device) -> Result<Model> {
-        let config_path = model_resource_dir.join("config.json");
-        let weights_path = model_resource_dir.join("model.ot");
-
+    pub fn load<P: AsRef<Path>>(config_path: P, weights_path: P, device: Device) -> Result<Model> {
         let id2label: HashMap<i64, String> = [
             (common::label2id("entailment") as i64, "entailment".into()),
             (
@@ -36,7 +33,7 @@ impl Model {
             .map(|(id, label)| (label.clone(), *id))
             .collect();
 
-        let mut config = BertConfig::from_file(&config_path);
+        let mut config = BertConfig::from_file(config_path);
         config.id2label = Some(id2label);
         config.label2id = Some(label2id);
         config.type_vocab_size = 2;
