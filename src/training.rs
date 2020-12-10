@@ -2,7 +2,9 @@ use crate::common;
 use crate::data::Batch;
 use crate::modeling::Model;
 use anyhow::Result;
+use log::info;
 use rand::seq::SliceRandom;
+use std::path::{Path, PathBuf};
 use tch::{nn, no_grad};
 
 pub struct Trainer<'a, O, S>
@@ -12,6 +14,7 @@ where
 {
     // Model.
     model: &'a Model,
+    out: PathBuf,
 
     // Data.
     train_data: Vec<Batch>,
@@ -33,13 +36,43 @@ where
     S: Scheduler,
 {
     pub fn train(mut self) -> Result<TrainResult> {
+        let mut train_loss = 0.0;
+        let mut best_epoch = 0;
+        let mut best_epoch_loss = 0.0;
+        let mut best_epoch_acc = 0.0;
+        let mut epoch_results: Vec<EpochResult> = Vec::new();
+
         for epoch in 0..self.epochs {
+            // Maybe update LR.
             if let Some(lr) = self.scheduler.pre_epoch_step(epoch) {
                 self.optimizer.set_lr(lr);
             }
 
-            let _ = self.train_epoch(epoch);
+            let epoch_result = self.train_epoch(epoch);
 
+            // Update running best and potentially save a new checkpoint.
+            if let (Some(val_loss), Some(val_acc)) =
+                (epoch_result.validation_loss, epoch_result.validation_acc)
+            {
+                // This is always true for the first epoch, so we know we'll have at least
+                // one checkpoint.
+                if val_acc >= best_epoch_acc {
+                    info!("Best epoch so far, saving weights to {:?}", self.out);
+                    self.model.vs.save(&self.out)?;
+                    info!("Done!");
+
+                    train_loss = epoch_result.train_loss;
+                    best_epoch = epoch;
+                    best_epoch_loss = val_loss;
+                    best_epoch_acc = val_acc;
+                }
+            } else {
+                train_loss = epoch_result.train_loss;
+            }
+
+            epoch_results.push(epoch_result);
+
+            // Maybe update LR.
             if let Some(lr) = self.scheduler.post_epoch_step(epoch) {
                 self.optimizer.set_lr(lr);
             }
@@ -47,15 +80,29 @@ where
             println!();
         }
 
-        // TODO: make this path configurable.
-        self.model.vs.save("weights.th")?;
+        if self.validation_data.is_none() {
+            info!("Saving trained weights to {:?}", self.out);
+            self.model.vs.save(&self.out)?;
+            info!("Done!");
+        }
 
-        // TODO:
         Ok(TrainResult {
-            best_epoch: 0,
-            train_loss: 0.0,
-            best_validation_loss: None,
-            best_validation_accuracy: None,
+            train_loss,
+            best_epoch: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch)
+            },
+            best_validation_loss: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch_loss)
+            },
+            best_validation_accuracy: if self.validation_data.is_none() {
+                None
+            } else {
+                Some(best_epoch_acc)
+            },
         })
     }
 
@@ -167,6 +214,7 @@ impl<'a> Trainer<'a, nn::AdamW, LinearSchedulerWithWarmup> {
 
 struct TrainerConfig<'a> {
     model: &'a Model,
+    out: PathBuf,
     train_data: Vec<Batch>,
     validation_data: Option<Vec<Batch>>,
     batch_size: u32,
@@ -190,6 +238,7 @@ impl<'a> TrainerBuilder<'a, nn::AdamW> {
         Self {
             config: TrainerConfig {
                 model,
+                out: PathBuf::from("weights.ot"),
                 train_data,
                 validation_data: None,
                 batch_size: 32,
@@ -222,6 +271,7 @@ where
 
         Ok(Trainer {
             model: self.config.model,
+            out: self.config.out,
             train_data: self.config.train_data,
             validation_data: self.config.validation_data,
             batch_size: self.config.batch_size,
@@ -230,6 +280,11 @@ where
             scheduler,
             rng: rand::thread_rng(),
         })
+    }
+
+    pub fn out_path<P: AsRef<Path>>(mut self, out: P) -> Self {
+        self.config.out = out.as_ref().into();
+        self
     }
 
     pub fn validation_data(mut self, validation_data: Vec<Batch>) -> Self {
@@ -313,8 +368,8 @@ impl Scheduler for LinearSchedulerWithWarmup {
 
 #[derive(Debug)]
 pub struct TrainResult {
-    pub best_epoch: u32,
     pub train_loss: f64,
+    pub best_epoch: Option<u32>,
     pub best_validation_loss: Option<f64>,
     pub best_validation_accuracy: Option<f64>,
 }
