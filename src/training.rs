@@ -5,9 +5,10 @@ use anyhow::Result;
 use rand::seq::SliceRandom;
 use tch::{nn, no_grad};
 
-pub struct Trainer<'a, O>
+pub struct Trainer<'a, O, S>
 where
     O: nn::OptimizerConfig,
+    S: Scheduler,
 {
     // Model.
     model: &'a Model,
@@ -20,49 +21,29 @@ where
     epochs: u32,
     batch_size: u32,
     optimizer: nn::Optimizer<O>,
+    scheduler: S,
 
     // Other stuff.
     rng: rand::rngs::ThreadRng,
 }
 
-struct TrainerConfig<'a> {
-    model: &'a Model,
-    train_data: Vec<Batch>,
-    validation_data: Option<Vec<Batch>>,
-    batch_size: u32,
-    epochs: u32,
-    lr: f64,
-}
-
-#[derive(Debug)]
-pub struct TrainResult {
-    pub best_epoch: u32,
-    pub train_loss: f64,
-    pub best_validation_loss: Option<f64>,
-    pub best_validation_accuracy: Option<f64>,
-}
-
-#[derive(Debug)]
-struct EpochResult {
-    train_loss: f64,
-    train_acc: f64,
-    validation_loss: Option<f64>,
-    validation_acc: Option<f64>,
-}
-
-impl<'a> Trainer<'a, nn::AdamW> {
-    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
-        TrainerBuilder::new(model, train_data)
-    }
-}
-
-impl<'a, O> Trainer<'a, O>
+impl<'a, O, S> Trainer<'a, O, S>
 where
     O: nn::OptimizerConfig,
+    S: Scheduler,
 {
     pub fn train(mut self) -> Result<TrainResult> {
         for epoch in 0..self.epochs {
+            if let Some(lr) = self.scheduler.pre_epoch_step(epoch) {
+                self.optimizer.set_lr(lr);
+            }
+
             let _ = self.train_epoch(epoch);
+
+            if let Some(lr) = self.scheduler.post_epoch_step(epoch) {
+                self.optimizer.set_lr(lr);
+            }
+
             println!("");
         }
 
@@ -83,12 +64,15 @@ where
         let num_batches = self.train_data.len() / self.batch_size as usize;
         let train_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, true);
 
-        for batch in self
+        for (batch_num, batch) in self
             .train_data
             .chunks(self.batch_size as usize)
             .map(Batch::combine)
+            .enumerate()
         {
-            // self.optimizer.zero_grad();
+            if let Some(lr) = self.scheduler.pre_batch_step(batch_num as u32) {
+                self.optimizer.set_lr(lr);
+            }
 
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
@@ -98,7 +82,11 @@ where
             let batch_loss_float = batch_loss.double_value(&[]);
             let batch_acc_float = batch_acc.double_value(&[]);
             train_loss_total += batch_loss_float;
-            train_acc_total += batch_acc_float;
+            train_acc_total += batch_acc_float * batch.size().0 as f64;
+
+            if let Some(lr) = self.scheduler.post_batch_step(batch_num as u32) {
+                self.optimizer.set_lr(lr);
+            }
 
             train_bar.inc(1);
             train_bar.set_message(&format!(
@@ -141,7 +129,7 @@ where
                 let batch_loss_float = batch_loss.double_value(&[]);
                 let batch_acc_float = batch_acc.double_value(&[]);
                 validation_loss_total += batch_loss_float;
-                validation_acc_total += batch_acc_float;
+                validation_acc_total += batch_acc_float * batch.size().0 as f64;
 
                 validation_bar.inc(1);
                 validation_bar.set_message(&format!(
@@ -168,6 +156,22 @@ where
     }
 }
 
+impl<'a> Trainer<'a, nn::AdamW, LinearSchedulerWithWarmup> {
+    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
+        TrainerBuilder::new(model, train_data)
+    }
+}
+
+struct TrainerConfig<'a> {
+    model: &'a Model,
+    train_data: Vec<Batch>,
+    validation_data: Option<Vec<Batch>>,
+    batch_size: u32,
+    epochs: u32,
+    lr: f64,
+    warmup_steps: u32,
+}
+
 pub struct TrainerBuilder<'a, O>
 where
     O: nn::OptimizerConfig,
@@ -188,6 +192,7 @@ impl<'a> TrainerBuilder<'a, nn::AdamW> {
                 batch_size: 32,
                 epochs: 10,
                 lr: 2e-5,
+                warmup_steps: 2000,
             },
             optimizer_config: nn::adamw(0.9, 0.999, 0.1),
         }
@@ -198,10 +203,19 @@ impl<'a, O> TrainerBuilder<'a, O>
 where
     O: nn::OptimizerConfig,
 {
-    pub fn build(self) -> Result<Trainer<'a, O>> {
+    pub fn build(self) -> Result<Trainer<'a, O, LinearSchedulerWithWarmup>> {
         let optimizer = self
             .optimizer_config
             .build(&self.config.model.vs, self.config.lr)?;
+
+        let scheduler = LinearSchedulerWithWarmup {
+            warmup_steps: self.config.warmup_steps,
+            total_steps: (self.config.train_data.len() as u32 / self.config.batch_size)
+                * self.config.epochs,
+            steps: 0,
+            base_lr: self.config.lr,
+            end_lr: 0.0,
+        };
 
         Ok(Trainer {
             model: self.config.model,
@@ -210,6 +224,7 @@ where
             batch_size: self.config.batch_size,
             epochs: self.config.epochs,
             optimizer,
+            scheduler,
             rng: rand::thread_rng(),
         })
     }
@@ -234,6 +249,11 @@ where
         self
     }
 
+    pub fn warmup_steps(mut self, warmup_steps: u32) -> Self {
+        self.config.warmup_steps = warmup_steps;
+        self
+    }
+
     pub fn optimizer<U>(self, optimizer_config: U) -> TrainerBuilder<'a, U>
     where
         U: nn::OptimizerConfig,
@@ -243,4 +263,63 @@ where
             optimizer_config,
         }
     }
+}
+
+pub trait Scheduler {
+    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        None
+    }
+
+    fn post_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        None
+    }
+
+    fn pre_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+        None
+    }
+
+    fn post_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+        None
+    }
+}
+
+pub struct LinearSchedulerWithWarmup {
+    warmup_steps: u32,
+    total_steps: u32,
+    steps: u32,
+    base_lr: f64,
+    end_lr: f64,
+}
+
+impl Scheduler for LinearSchedulerWithWarmup {
+    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+        self.steps += 1;
+        let lr = if self.steps < self.warmup_steps {
+            self.base_lr * (self.steps as f64 / self.warmup_steps as f64)
+        } else if self.steps > self.total_steps {
+            self.end_lr
+        } else {
+            let current_decay_steps = self.total_steps - self.steps;
+            let total_decay_steps = self.total_steps - self.warmup_steps;
+            let factor = current_decay_steps as f64 / total_decay_steps as f64;
+            factor * (self.base_lr - self.end_lr) + self.end_lr
+        };
+        Some(lr)
+    }
+}
+
+#[derive(Debug)]
+pub struct TrainResult {
+    pub best_epoch: u32,
+    pub train_loss: f64,
+    pub best_validation_loss: Option<f64>,
+    pub best_validation_accuracy: Option<f64>,
+}
+
+#[derive(Debug)]
+struct EpochResult {
+    train_loss: f64,
+    train_acc: f64,
+    validation_loss: Option<f64>,
+    validation_acc: Option<f64>,
 }

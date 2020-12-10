@@ -81,6 +81,7 @@ fn train(reader: &Reader, model: &Model, opt: &TrainOpts) -> Result<()> {
 
     let trainer = Trainer::builder(model, train_data)
         .lr(opt.lr)
+        .warmup_steps(opt.warmup_steps)
         .batch_size(opt.batch_size)
         .validation_data(dev_data)
         .build()?;
@@ -143,6 +144,10 @@ struct TrainOpts {
     #[structopt(long = "lr", name = "lr", default_value = "2e-6")]
     /// The learning rate.
     lr: f64,
+
+    #[structopt(long = "warmup-steps", name = "warmup-steps", default_value = "2000")]
+    /// The number of warmup steps for the learning rate scheduler.
+    warmup_steps: u32,
 
     #[structopt(long = "batch-size", name = "batch-size", default_value = "16")]
     /// The learning rate.
