@@ -29,9 +29,9 @@ fn main() -> Result<()> {
     let (reader, model) = load_components(&opt)?;
 
     match opt.cmd {
-        RustBERTaCmd::Train => {
+        RustBERTaCmd::Train(train_opts) => {
             info!("Training RustBERTa on SNLI");
-            train(&reader, &model)?;
+            train(&reader, &model, &train_opts)?;
         }
         RustBERTaCmd::Evaluate { path } => {
             info!("Evaluating RustBERTa on {}", path);
@@ -68,7 +68,7 @@ fn load_components(opt: &RustBERTaOpt) -> Result<(Reader, Model)> {
     Ok((reader, model))
 }
 
-fn train(reader: &Reader, model: &Model) -> Result<()> {
+fn train(reader: &Reader, model: &Model, opt: &TrainOpts) -> Result<()> {
     info!("Reading dev data");
     let dev_data_path = cached_path::cached_path(DEV_PATH)?;
     let dev_data = reader.read(dev_data_path.to_str().unwrap())?;
@@ -80,6 +80,8 @@ fn train(reader: &Reader, model: &Model) -> Result<()> {
     info!("Read {} instances", train_data.len());
 
     let trainer = Trainer::builder(model, train_data)
+        .lr(opt.lr)
+        .batch_size(opt.batch_size)
         .validation_data(dev_data)
         .build()?;
 
@@ -123,7 +125,7 @@ struct RustBERTaOpt {
 #[derive(Debug, StructOpt)]
 enum RustBERTaCmd {
     /// Train or fine-tune a new model on SNLI.
-    Train,
+    Train(TrainOpts),
 
     /// Evaluate a trained model on an SNLI dataset.
     Evaluate {
@@ -134,4 +136,15 @@ enum RustBERTaCmd {
 
     /// Predict whether a premise and hypothesis exhibit entailment, contradiction, or neutrality.
     Predict { premise: String, hypothesis: String },
+}
+
+#[derive(Debug, StructOpt)]
+struct TrainOpts {
+    #[structopt(long = "lr", name = "lr", default_value = "2e-6")]
+    /// The learning rate.
+    lr: f64,
+
+    #[structopt(long = "batch-size", name = "batch-size", default_value = "16")]
+    /// The learning rate.
+    batch_size: u32,
 }

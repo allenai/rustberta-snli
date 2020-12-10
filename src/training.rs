@@ -2,7 +2,6 @@ use crate::common;
 use crate::data::Batch;
 use crate::modeling::Model;
 use anyhow::Result;
-use log::info;
 use rand::seq::SliceRandom;
 use tch::{nn, no_grad};
 
@@ -51,8 +50,8 @@ struct EpochResult {
     validation_acc: Option<f64>,
 }
 
-impl<'a> Trainer<'a, nn::Adam> {
-    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::Adam> {
+impl<'a> Trainer<'a, nn::AdamW> {
+    pub fn builder(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
         TrainerBuilder::new(model, train_data)
     }
 }
@@ -63,9 +62,8 @@ where
 {
     pub fn train(mut self) -> Result<TrainResult> {
         for epoch in 0..self.epochs {
-            info!("Starting epoch {}", epoch);
-            let epoch_result = self.train_epoch();
-            info!("Epoch finished: {:?}", epoch_result);
+            let _ = self.train_epoch(epoch);
+            println!("");
         }
 
         // TODO:
@@ -77,22 +75,20 @@ where
         })
     }
 
-    fn train_epoch(&mut self) -> EpochResult {
-        info!("Training");
-
+    fn train_epoch(&mut self, epoch: u32) -> EpochResult {
         self.train_data.shuffle(&mut self.rng);
 
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
         let num_batches = self.train_data.len() / self.batch_size as usize;
-        let train_bar = common::new_progress_bar(num_batches);
+        let train_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, true);
 
         for batch in self
             .train_data
             .chunks(self.batch_size as usize)
             .map(Batch::combine)
         {
-            self.optimizer.zero_grad();
+            // self.optimizer.zero_grad();
 
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
@@ -107,18 +103,17 @@ where
             train_bar.inc(1);
             train_bar.set_message(&format!(
                 "batch loss: {:.4}, batch acc: {:.4}",
-                batch_loss_float, batch_acc_float
+                batch_loss_float / (self.batch_size as f64),
+                batch_acc_float
             ));
         }
 
-        train_bar.finish();
-
         let train_loss = train_loss_total / (self.train_data.len() as f64);
         let train_acc = train_acc_total / (self.train_data.len() as f64);
-        info!(
-            "Train loss: {:.4}, train accuracy: {:.4}",
+        train_bar.finish_with_message(&format!(
+            "epoch train loss: {:.4}, epoch train acc: {:.4}",
             train_loss, train_acc
-        );
+        ));
 
         if self.validation_data.is_none() {
             return EpochResult {
@@ -129,12 +124,11 @@ where
             };
         }
 
-        info!("Validating");
         let validation_data = self.validation_data.as_ref().unwrap();
         let mut validation_loss_total = 0.0;
         let mut validation_acc_total = 0.0;
         let num_batches = validation_data.len() / self.batch_size as usize;
-        let validation_bar = common::new_progress_bar(num_batches);
+        let validation_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, false);
 
         no_grad(|| {
             for batch in validation_data
@@ -152,15 +146,18 @@ where
                 validation_bar.inc(1);
                 validation_bar.set_message(&format!(
                     "batch loss: {:.4}, batch acc: {:.4}",
-                    batch_loss_float, batch_acc_float
+                    batch_loss_float / (self.batch_size as f64),
+                    batch_acc_float
                 ));
             }
         });
 
-        validation_bar.finish();
-
         let validation_loss = validation_loss_total / (validation_data.len() as f64);
         let validation_acc = validation_acc_total / (validation_data.len() as f64);
+        validation_bar.finish_with_message(&format!(
+            "epoch valid loss: {:.4}, epoch valid acc: {:.4}",
+            validation_loss, validation_acc
+        ));
 
         EpochResult {
             train_loss,
@@ -181,18 +178,18 @@ where
     optimizer_config: O,
 }
 
-impl<'a> TrainerBuilder<'a, nn::Adam> {
-    pub fn new(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::Adam> {
+impl<'a> TrainerBuilder<'a, nn::AdamW> {
+    pub fn new(model: &'a Model, train_data: Vec<Batch>) -> TrainerBuilder<nn::AdamW> {
         Self {
             config: TrainerConfig {
                 model,
                 train_data,
                 validation_data: None,
-                batch_size: 8,
+                batch_size: 32,
                 epochs: 10,
                 lr: 2e-5,
             },
-            optimizer_config: nn::adam(0.9, 0.999, 0.1),
+            optimizer_config: nn::adamw(0.9, 0.999, 0.1),
         }
     }
 }
