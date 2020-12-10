@@ -193,9 +193,9 @@ impl<'a> TrainerBuilder<'a, nn::AdamW> {
                 train_data,
                 validation_data: None,
                 batch_size: 32,
-                epochs: 3,
+                epochs: 2,
                 lr: 2e-5,
-                warmup_steps: 2000,
+                warmup_steps: 1000,
             },
             optimizer_config: nn::adamw(0.9, 0.999, 0.1),
         }

@@ -146,15 +146,15 @@ struct TrainOpts {
     /// The learning rate.
     lr: f64,
 
-    #[structopt(long = "warmup-steps", name = "warmup-steps", default_value = "2000")]
+    #[structopt(long = "warmup-steps", name = "warmup-steps", default_value = "1000")]
     /// The number of warmup steps for the learning rate scheduler.
     warmup_steps: u32,
 
-    #[structopt(long = "batch-size", name = "batch-size", default_value = "16")]
+    #[structopt(long = "batch-size", name = "batch-size", default_value = "32")]
     /// The learning rate.
     batch_size: u32,
 
-    #[structopt(long = "epochs", name = "epochs", default_value = "3")]
+    #[structopt(long = "epochs", name = "epochs", default_value = "2")]
     /// The number of epochs to train for.
     epochs: u32,
 }
