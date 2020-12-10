@@ -44,7 +44,7 @@ where
                 self.optimizer.set_lr(lr);
             }
 
-            println!("");
+            println!();
         }
 
         // TODO: make this path configurable.
