@@ -52,25 +52,25 @@ for this step, just delete the `target/` directory and start over.
 To see all of the available commands, run
 
 ```bash
-cargo run -- --help
+cargo run --release -- help
 ```
 
 For example, to fine-tune a pretrained RoBERTa model, run
 
 ```bash
-cargo run -- train --out weights.ot
+cargo run --release -- train --out weights.ot
 ```
 
 To get a new prediction with a fine-tuned model, run
 
 ```bash
-cargo run -- predict --weigths weights.ot
+cargo run --release -- predict --weigths weights.ot
 ```
 
 And to serve a fine-tuned model as a production-grade webservice with batched prediction, run
 
 ```bash
-cargo run -- serve
+cargo run --release -- serve
 ```
 
 This will serve on port 3030 by default. You can then test it out by running:
