@@ -49,28 +49,36 @@ for this step, just delete the `target/` directory and start over.
 
 ## Compiling and running
 
+To build the release binary, just run `make`.
+
 To see all of the available commands, run
 
 ```bash
-cargo run --release -- help
+roberta-snli --help
 ```
 
 For example, to fine-tune a pretrained RoBERTa model, run
 
 ```bash
-cargo run --release -- train --out weights.ot
+roberta-snli train --out weights.ot
 ```
 
-To get a new prediction with a fine-tuned model, run
+To interactively get predictions with a fine-tuned model, run
 
 ```bash
-cargo run --release -- predict --weigths weights.ot
+roberta-snli predict --weigths weights.ot
+```
+
+To evaluate a fine-tuned model on the test set, run
+
+```bash
+roberta-snli evaluate
 ```
 
 And to serve a fine-tuned model as a production-grade webservice with batched prediction, run
 
 ```bash
-cargo run --release -- serve
+roberta-snli serve
 ```
 
 This will serve on port 3030 by default. You can then test it out by running:
