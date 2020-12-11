@@ -132,7 +132,7 @@ where
         let indices: Vec<usize> = (0..data.len()).collect();
         indices
             .chunks(self.batch_size as usize)
-            .map(|indices| Vec::from(indices))
+            .map(Vec::from)
             .collect()
     }
 
