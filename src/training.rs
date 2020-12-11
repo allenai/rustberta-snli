@@ -36,6 +36,19 @@ where
     S: Scheduler,
 {
     pub fn train(mut self) -> Result<TrainResult> {
+        info!("Trainable parameters:");
+        let mut var_names_and_sizes: Vec<(String, Vec<i64>)> = self
+            .model
+            .vs
+            .variables()
+            .iter()
+            .map(|(var_name, tensor)| (var_name.clone(), tensor.size()))
+            .collect();
+        var_names_and_sizes.sort_by_key(|(name, _)| name.clone());
+        for (var_name, var_size) in var_names_and_sizes {
+            info!("  - {}: {:?}", var_name, var_size);
+        }
+
         let mut train_loss = 0.0;
         let mut best_epoch = 0;
         let mut best_epoch_loss = 0.0;
