@@ -25,15 +25,22 @@ pub(crate) fn new_spinner() -> indicatif::ProgressBar {
     progress_bar
 }
 
+pub(crate) enum BarType {
+    Train,
+    Validation,
+    Test,
+}
+
 pub(crate) fn new_epoch_bar(
     epoch: u32,
     total_epochs: u32,
     steps: usize,
-    train: bool,
+    bar_type: BarType,
 ) -> indicatif::ProgressBar {
-    let template = match train {
-        true =>  "Training   [{elapsed_precise} < {eta_precise}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
-        false => "Validating [{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+    let template = match bar_type {
+        BarType::Train =>      "Training   [{elapsed_precise} < {eta_precise}] [{bar:40.green}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+        BarType::Validation => "Validating [{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
+        BarType::Test =>       "Evaluating [{elapsed_precise} < {eta_precise}] [{bar:40.cyan/blue}] {pos:>5}/{len:5} ({percent:>3}%), {msg}",
     };
     indicatif::ProgressBar::new(steps as u64).with_style(
         indicatif::ProgressStyle::default_bar()

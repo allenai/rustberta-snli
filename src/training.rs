@@ -143,7 +143,7 @@ where
 
         let mut loss_total = 0.0;
         let mut acc_total = 0.0;
-        let bar = common::new_epoch_bar(0, 1, num_batches, false);
+        let bar = common::new_epoch_bar(0, 1, num_batches, common::BarType::Test);
 
         no_grad(|| {
             for batch in batch_indices.iter().map(|indices| {
@@ -180,7 +180,8 @@ where
 
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
-        let train_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, true);
+        let train_bar =
+            common::new_epoch_bar(epoch, self.epochs, num_batches, common::BarType::Train);
 
         for (batch_num, batch) in batch_indices
             .iter()
@@ -239,7 +240,8 @@ where
 
         let mut validation_loss_total = 0.0;
         let mut validation_acc_total = 0.0;
-        let validation_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, false);
+        let validation_bar =
+            common::new_epoch_bar(epoch, self.epochs, num_batches, common::BarType::Validation);
 
         no_grad(|| {
             for batch in batch_indices.iter().map(|indices| {
