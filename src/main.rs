@@ -89,6 +89,7 @@ fn train(opt: &TrainOpts) -> Result<()> {
     let trainer = Trainer::builder(&model, train_data)
         .lr(opt.lr)
         .warmup_steps(opt.warmup_steps)
+        .out_path(&opt.out)
         .epochs(opt.epochs)
         .batch_size(opt.batch_size)
         .validation_data(dev_data)
@@ -321,8 +322,12 @@ struct TrainOpts {
     merges: String,
 
     #[structopt(long = "weights")]
-    /// The path (local or remote) to the serialized variable store.
+    /// The path (local or remote) to the initial variable store.
     weights: Option<String>,
+
+    #[structopt(long = "out", default_value = "weights.ot")]
+    /// The filename to save the final weights variable store to.
+    out: String,
 }
 
 #[derive(Debug, StructOpt)]
