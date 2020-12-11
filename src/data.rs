@@ -63,7 +63,7 @@ impl Batch {
         (size[0], size[1])
     }
 
-    pub fn combine(batches: &[Batch]) -> Self {
+    pub fn combine<B: std::borrow::Borrow<Batch>>(batches: &[B]) -> Self {
         if batches.is_empty() {
             panic!("Tried to combine an empty slice of batches");
         }
@@ -72,24 +72,24 @@ impl Batch {
         let mut max_len = 0;
         batches
             .iter()
-            .for_each(|b| max_len = std::cmp::max(max_len, b.token_ids.size()[1]));
+            .for_each(|b| max_len = std::cmp::max(max_len, b.borrow().token_ids.size()[1]));
 
         let mut token_ids_tensors: Vec<Tensor> = Vec::with_capacity(batches.len());
         let mut type_ids_tensors: Vec<Tensor> = Vec::with_capacity(batches.len());
-        let mut gold_labels_tensors: Option<Vec<&Tensor>> = match batches[0].gold_labels {
+        let mut gold_labels_tensors: Option<Vec<&Tensor>> = match batches[0].borrow().gold_labels {
             Some(_) => Some(Vec::with_capacity(batches.len())),
             _ => None,
         };
         let mut mask_tensors: Vec<Tensor> = Vec::with_capacity(batches.len());
 
         for b in batches {
-            let current_len = b.token_ids.size()[1];
+            let current_len = b.borrow().token_ids.size()[1];
             let padding_needed = (max_len - current_len) as usize;
 
             if padding_needed > 0 {
                 let token_ids = Tensor::cat(
                     &[
-                        &b.token_ids,
+                        &b.borrow().token_ids,
                         &Tensor::of_slice(&vec![PAD_TOKEN_ID; padding_needed]).unsqueeze(0),
                     ],
                     1,
@@ -98,7 +98,7 @@ impl Batch {
 
                 let type_ids = Tensor::cat(
                     &[
-                        &b.type_ids,
+                        &b.borrow().type_ids,
                         &Tensor::of_slice(&vec![PAD_TOKEN_ID; padding_needed]).unsqueeze(0),
                     ],
                     1,
@@ -107,21 +107,21 @@ impl Batch {
 
                 let mask = Tensor::cat(
                     &[
-                        &b.mask,
+                        &b.borrow().mask,
                         &Tensor::of_slice(&vec![0; padding_needed]).unsqueeze(0),
                     ],
                     1,
                 );
                 mask_tensors.push(mask);
             } else {
-                token_ids_tensors.push(b.token_ids.copy());
-                type_ids_tensors.push(b.type_ids.copy());
-                mask_tensors.push(b.mask.copy());
+                token_ids_tensors.push(b.borrow().token_ids.copy());
+                type_ids_tensors.push(b.borrow().type_ids.copy());
+                mask_tensors.push(b.borrow().mask.copy());
             }
 
             if let Some(label_tensors) = gold_labels_tensors.as_mut() {
-                label_tensors.push(b.gold_labels.as_ref().unwrap());
-            } else if b.gold_labels.is_some() {
+                label_tensors.push(b.borrow().gold_labels.as_ref().unwrap());
+            } else if b.borrow().gold_labels.is_some() {
                 panic!("expect batch without gold labels");
             }
         }
@@ -273,14 +273,13 @@ mod tests {
 
     #[test]
     fn test_batching() {
-        let batches = vec![
-            Batch::new(&[0, 3, 4, 2], &[0, 0, 0, 0], Some(0)),
-            Batch::new(&[0, 3, 2], &[0, 0, 0], Some(1)),
-        ];
+        let x1 = Batch::new(&[0, 3, 4, 2], &[0, 0, 0, 0], Some(0));
+        let x2 = Batch::new(&[0, 3, 2], &[0, 0, 0], Some(1));
+        let batches = vec![&x1, &x2];
         assert_eq!(batches[0].size(), (1, 4));
         assert_eq!(batches[1].size(), (1, 3));
 
-        let batch = Batch::combine(&batches);
+        let batch = Batch::combine(&batches[..]);
         assert_eq!(batch.size(), (2, 4));
 
         assert_eq!(
