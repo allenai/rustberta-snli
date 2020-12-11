@@ -97,7 +97,19 @@ fn train(opt: &TrainOpts) -> Result<()> {
 
     info!("Starting training");
     let result = trainer.train()?;
-    info!("Finished training: {:?}", result);
+    info!("Successfully finished training");
+    if let (Some(best_epoch), Some(best_val_acc), Some(best_val_loss)) = (
+        result.best_epoch,
+        result.best_validation_accuracy,
+        result.best_validation_loss,
+    ) {
+        info!("Best epoch: {}", best_epoch);
+        info!("Best epoch train loss: {:.4}", result.train_loss);
+        info!("Best validation loss:  {:.4}", best_val_loss);
+        info!("Best validation acc:   {:.4}", best_val_acc);
+    } else {
+        info!("Training loss: {:.4}", result.train_loss);
+    }
 
     Ok(())
 }
