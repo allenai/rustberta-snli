@@ -29,7 +29,7 @@ const DEFAULT_VOCAB: &str = "config/vocab.txt";
 const DEFAULT_MERGES: &str = "config/merges.txt";
 const TRAIN_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_train.jsonl";
 const DEV_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_dev.jsonl";
-// const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
+const TEST_PATH: &str = "https://allennlp.s3.amazonaws.com/datasets/snli/snli_1.0_test.jsonl";
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -41,6 +41,9 @@ fn main() -> Result<()> {
         }
         RustBERTaCmd::Predict(predict_opts) => {
             predict(&predict_opts)?;
+        }
+        RustBERTaCmd::Evaluate(eval_opts) => {
+            eval(&eval_opts)?;
         }
         RustBERTaCmd::Serve => {
             let mut rt = tokio::runtime::Runtime::new()?;
@@ -178,6 +181,42 @@ fn predict(opt: &PredictOpts) -> Result<()> {
     Ok(())
 }
 
+fn eval(opt: &EvalOpts) -> Result<()> {
+    let weights_path = match &opt.weights {
+        Some(weights_path) => cached_path::cached_path(weights_path)?,
+        None => {
+            info!("Caching fine-tuned model");
+            cached_path::cached_path(FINE_TUNED_MODEL)?
+        }
+    };
+    let vocab_path = cached_path::cached_path(&opt.vocab)?;
+    let merges_path = cached_path::cached_path(&opt.merges)?;
+    let config_path = cached_path::cached_path(&opt.config)?;
+
+    info!("Loading tokenizer and reader");
+    let reader = Reader::new(&vocab_path, &merges_path)?;
+
+    let device = Device::cuda_if_available();
+
+    info!("Loading model to {:?}", device);
+    let model = Model::load(&config_path, &weights_path, device)?;
+
+    info!("Reading test data");
+    let test_data_path = cached_path::cached_path(&opt.data)?;
+    let test_data = reader.read(test_data_path.to_str().unwrap())?;
+    info!("Read {} instances", test_data.len());
+
+    let trainer = Trainer::builder(&model, vec![])
+        .batch_size(opt.batch_size)
+        .build()?;
+
+    let result = trainer.evaluate(test_data);
+    info!("Loss:     {:.4}", result.loss);
+    info!("Accuracy: {:.4}", result.acc);
+
+    Ok(())
+}
+
 async fn serve() -> Result<()> {
     // POST /predict/ {"premise":"...","hypothesis":""}
     let routes = warp::post()
@@ -295,6 +334,10 @@ enum RustBERTaCmd {
     Predict(PredictOpts),
 
     #[structopt(setting = structopt::clap::AppSettings::ColoredHelp)]
+    /// Evaluate a fine-tuned model on the test set.
+    Evaluate(EvalOpts),
+
+    #[structopt(setting = structopt::clap::AppSettings::ColoredHelp)]
     /// Serve a model as a production-grade webservice with batched prediction.
     Serve,
 }
@@ -359,4 +402,31 @@ struct PredictOpts {
     #[structopt(long = "weights")]
     /// The path (local or remote) to the serialized variable store.
     weights: Option<String>,
+}
+
+#[derive(Debug, StructOpt)]
+struct EvalOpts {
+    #[structopt(long = "config", default_value = DEFAULT_CONFIG)]
+    /// The path (local or remote) to the RustBERT config file.
+    config: String,
+
+    #[structopt(long = "vocab", default_value = DEFAULT_VOCAB)]
+    /// The path (local or remote) to the vocab file.
+    vocab: String,
+
+    #[structopt(long = "merges", default_value = DEFAULT_MERGES)]
+    /// The path (local or remote) to the merges file.
+    merges: String,
+
+    #[structopt(long = "weights")]
+    /// The path (local or remote) to the serialized variable store.
+    weights: Option<String>,
+
+    #[structopt(long = "data", default_value = TEST_PATH)]
+    /// The path (local or remote) to the test set.
+    data: String,
+
+    #[structopt(long = "batch-size", default_value = "32")]
+    /// The learning rate.
+    batch_size: u32,
 }

@@ -136,9 +136,46 @@ where
             .collect()
     }
 
+    pub fn evaluate(&self, mut data: Vec<Batch>) -> EvalResult {
+        data.sort_by_key(|x| x.size().1);
+        let batch_indices = self.get_batch_indices(&data);
+        let num_batches = batch_indices.len();
+
+        let mut loss_total = 0.0;
+        let mut acc_total = 0.0;
+        let bar = common::new_epoch_bar(0, 1, num_batches, false);
+
+        no_grad(|| {
+            for batch in batch_indices.iter().map(|indices| {
+                let instances: Vec<&Batch> = indices.iter().map(|i| &data[*i]).collect();
+                Batch::combine(&instances[..])
+            }) {
+                let (batch_loss, batch_acc) =
+                    self.model.forward_loss(batch.to_device(self.model.device));
+
+                let batch_loss_float = batch_loss.double_value(&[]);
+                let batch_acc_float = batch_acc.double_value(&[]);
+                loss_total += batch_loss_float;
+                acc_total += batch_acc_float * batch.size().0 as f64;
+
+                bar.inc(1);
+                bar.set_message(&format!(
+                    "batch loss: {:.4}, batch acc: {:.4}",
+                    batch_loss_float / (self.batch_size as f64),
+                    batch_acc_float
+                ));
+            }
+        });
+
+        let loss = loss_total / (data.len() as f64);
+        let acc = acc_total / (data.len() as f64);
+        bar.finish_with_message(&format!("loss: {:.4}, acc: {:.4}", loss, acc));
+
+        EvalResult { loss, acc }
+    }
+
     fn train_epoch(&mut self, epoch: u32) -> EpochResult {
-        let mut batch_indices = self.get_batch_indices(&self.train_data);
-        batch_indices.shuffle(&mut self.rng);
+        let batch_indices = self.get_batch_indices(&self.train_data);
         let num_batches = batch_indices.len();
 
         let mut train_loss_total = 0.0;
@@ -206,7 +243,7 @@ where
 
         no_grad(|| {
             for batch in batch_indices.iter().map(|indices| {
-                let instances: Vec<&Batch> = indices.iter().map(|i| &self.train_data[*i]).collect();
+                let instances: Vec<&Batch> = indices.iter().map(|i| &validation_data[*i]).collect();
                 Batch::combine(&instances[..])
             }) {
                 let (batch_loss, batch_acc) =
@@ -417,4 +454,10 @@ struct EpochResult {
     train_acc: f64,
     validation_loss: Option<f64>,
     validation_acc: Option<f64>,
+}
+
+#[derive(Debug)]
+pub struct EvalResult {
+    pub loss: f64,
+    pub acc: f64,
 }
