@@ -3,6 +3,8 @@
 A Rust implementation of a RoBERTa classification model for the [SNLI dataset](https://nlp.stanford.edu/projects/snli/), with support for fine-tuning, predicting, and serving.
 This is built on top of [tch-rs](https://github.com/LaurentMazare/tch-rs) and [rust-bert](https://github.com/guillaume-be/rust-bert).
 
+![](./img/demo.gif)
+
 ## Background
 
 This was the result of the **AI2 2020 Employee Hackathon**.
