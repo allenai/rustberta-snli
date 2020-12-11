@@ -128,7 +128,7 @@ where
         })
     }
 
-    fn get_batch_indices(&self, data: &Vec<Batch>) -> Vec<Vec<usize>> {
+    fn get_batch_indices(&self, data: &[Batch]) -> Vec<Vec<usize>> {
         let indices: Vec<usize> = (0..data.len()).collect();
         indices
             .chunks(self.batch_size as usize)
