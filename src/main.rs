@@ -170,11 +170,11 @@ fn predict(opt: &PredictOpts) -> Result<()> {
         let labels = model.predict(batch.to_device(model.device));
         let label = labels[0];
         if label == "entailment" {
-            println!("✅ {}\n", label);
+            println!("✓ {}\n", label);
         } else if label == "contradiction" {
-            println!("❌ {}\n", label);
+            println!("ⓧ {}\n", label);
         } else {
-            println!("❓ {}\n", label);
+            println!("⊝ {}\n", label);
         }
     }
 

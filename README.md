@@ -85,7 +85,7 @@ This will serve on port 3030 by default. You can then test it out by running:
 
 ```bash
 curl \
-    -d '{"premise":"A soccer game with multiple males playing.","hypothesis":"Some men are playing a sport."}' \
+    -d '{"premise":"A soccer game with multiple people playing.","hypothesis":"Some people are playing a sport."}' \
     -H "Content-Type: application/json" \
     http://localhost:3030/predict
 ```
