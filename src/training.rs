@@ -23,7 +23,7 @@ where
     // Hyperparameters.
     epochs: u32,
     batch_size: u32,
-    optimizer: nn::Optimizer<O>,
+    optimizer: std::cell::RefCell<nn::Optimizer<O>>,
     scheduler: S,
 
     // Other stuff.
@@ -49,6 +49,15 @@ where
             info!("  - {}: {:?}", var_name, var_size);
         }
 
+        // Sort data by sequence length.
+        info!("Sorting training data");
+        self.train_data.sort_by_key(|x| x.size().1);
+
+        if let Some(data) = &mut self.validation_data {
+            info!("Sorting validation data");
+            data.sort_by_key(|x| x.size().1);
+        }
+
         let mut train_loss = 0.0;
         let mut best_epoch = 0;
         let mut best_epoch_loss = 0.0;
@@ -58,7 +67,7 @@ where
         for epoch in 0..self.epochs {
             // Maybe update LR.
             if let Some(lr) = self.scheduler.pre_epoch_step(epoch) {
-                self.optimizer.set_lr(lr);
+                self.optimizer.borrow_mut().set_lr(lr);
             }
 
             let epoch_result = self.train_epoch(epoch);
@@ -87,7 +96,7 @@ where
 
             // Maybe update LR.
             if let Some(lr) = self.scheduler.post_epoch_step(epoch) {
-                self.optimizer.set_lr(lr);
+                self.optimizer.borrow_mut().set_lr(lr);
             }
 
             println!();
@@ -119,28 +128,39 @@ where
         })
     }
 
+    fn get_batch_indices(&self, data: &[Batch]) -> Vec<Vec<usize>> {
+        let indices: Vec<usize> = (0..data.len()).collect();
+        indices
+            .chunks(self.batch_size as usize)
+            .map(Vec::from)
+            .collect()
+    }
+
     fn train_epoch(&mut self, epoch: u32) -> EpochResult {
-        self.train_data.shuffle(&mut self.rng);
+        let mut batch_indices = self.get_batch_indices(&self.train_data);
+        batch_indices.shuffle(&mut self.rng);
+        let num_batches = batch_indices.len();
 
         let mut train_loss_total = 0.0;
         let mut train_acc_total = 0.0;
-        let num_batches = self.train_data.len() / self.batch_size as usize;
         let train_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, true);
 
-        for (batch_num, batch) in self
-            .train_data
-            .chunks(self.batch_size as usize)
-            .map(Batch::combine)
+        for (batch_num, batch) in batch_indices
+            .iter()
+            .map(|indices| {
+                let instances: Vec<&Batch> = indices.iter().map(|i| &self.train_data[*i]).collect();
+                Batch::combine(&instances[..])
+            })
             .enumerate()
         {
             if let Some(lr) = self.scheduler.pre_batch_step(batch_num as u32) {
-                self.optimizer.set_lr(lr);
+                self.optimizer.borrow_mut().set_lr(lr);
             }
 
             let (batch_loss, batch_acc) =
                 self.model.forward_loss(batch.to_device(self.model.device));
 
-            self.optimizer.backward_step(&batch_loss);
+            self.optimizer.borrow_mut().backward_step(&batch_loss);
 
             let batch_loss_float = batch_loss.double_value(&[]);
             let batch_acc_float = batch_acc.double_value(&[]);
@@ -148,7 +168,7 @@ where
             train_acc_total += batch_acc_float * batch.size().0 as f64;
 
             if let Some(lr) = self.scheduler.post_batch_step(batch_num as u32) {
-                self.optimizer.set_lr(lr);
+                self.optimizer.borrow_mut().set_lr(lr);
             }
 
             train_bar.inc(1);
@@ -176,16 +196,19 @@ where
         }
 
         let validation_data = self.validation_data.as_ref().unwrap();
+        let mut batch_indices = self.get_batch_indices(&validation_data);
+        batch_indices.shuffle(&mut self.rng);
+        let num_batches = batch_indices.len();
+
         let mut validation_loss_total = 0.0;
         let mut validation_acc_total = 0.0;
-        let num_batches = validation_data.len() / self.batch_size as usize;
         let validation_bar = common::new_epoch_bar(epoch, self.epochs, num_batches, false);
 
         no_grad(|| {
-            for batch in validation_data
-                .chunks(self.batch_size as usize)
-                .map(Batch::combine)
-            {
+            for batch in batch_indices.iter().map(|indices| {
+                let instances: Vec<&Batch> = indices.iter().map(|i| &self.train_data[*i]).collect();
+                Batch::combine(&instances[..])
+            }) {
                 let (batch_loss, batch_acc) =
                     self.model.forward_loss(batch.to_device(self.model.device));
 
@@ -277,7 +300,7 @@ where
             warmup_steps: self.config.warmup_steps,
             total_steps: (self.config.train_data.len() as u32 / self.config.batch_size)
                 * self.config.epochs,
-            steps: 0,
+            steps: std::cell::RefCell::new(0),
             base_lr: self.config.lr,
             end_lr: 0.0,
         };
@@ -289,7 +312,7 @@ where
             validation_data: self.config.validation_data,
             batch_size: self.config.batch_size,
             epochs: self.config.epochs,
-            optimizer,
+            optimizer: std::cell::RefCell::new(optimizer),
             scheduler,
             rng: rand::thread_rng(),
         })
@@ -337,19 +360,19 @@ where
 }
 
 pub trait Scheduler {
-    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+    fn pre_batch_step(&self, _batch_num: u32) -> Option<f64> {
         None
     }
 
-    fn post_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
+    fn post_batch_step(&self, _batch_num: u32) -> Option<f64> {
         None
     }
 
-    fn pre_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+    fn pre_epoch_step(&self, _epoch: u32) -> Option<f64> {
         None
     }
 
-    fn post_epoch_step(&mut self, _epoch: u32) -> Option<f64> {
+    fn post_epoch_step(&self, _epoch: u32) -> Option<f64> {
         None
     }
 }
@@ -357,20 +380,21 @@ pub trait Scheduler {
 pub struct LinearSchedulerWithWarmup {
     warmup_steps: u32,
     total_steps: u32,
-    steps: u32,
+    steps: std::cell::RefCell<u32>,
     base_lr: f64,
     end_lr: f64,
 }
 
 impl Scheduler for LinearSchedulerWithWarmup {
-    fn pre_batch_step(&mut self, _batch_num: u32) -> Option<f64> {
-        self.steps += 1;
-        let lr = if self.steps < self.warmup_steps {
-            self.base_lr * (self.steps as f64 / self.warmup_steps as f64)
-        } else if self.steps > self.total_steps {
+    fn pre_batch_step(&self, _batch_num: u32) -> Option<f64> {
+        let mut steps = self.steps.borrow_mut();
+        *steps += 1;
+        let lr = if *steps < self.warmup_steps {
+            self.base_lr * (*steps as f64 / self.warmup_steps as f64)
+        } else if *steps > self.total_steps {
             self.end_lr
         } else {
-            let current_decay_steps = self.total_steps - self.steps;
+            let current_decay_steps = self.total_steps - *steps;
             let total_decay_steps = self.total_steps - self.warmup_steps;
             let factor = current_decay_steps as f64 / total_decay_steps as f64;
             factor * (self.base_lr - self.end_lr) + self.end_lr
