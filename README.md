@@ -54,31 +54,31 @@ To build the release binary, just run `make`.
 To see all of the available commands, run
 
 ```bash
-roberta-snli --help
+./roberta-snli --help
 ```
 
 For example, to fine-tune a pretrained RoBERTa model, run
 
 ```bash
-roberta-snli train --out weights.ot
+./roberta-snli train --out weights.ot
 ```
 
 To interactively get predictions with a fine-tuned model, run
 
 ```bash
-roberta-snli predict --weigths weights.ot
+./roberta-snli predict --weigths weights.ot
 ```
 
 To evaluate a fine-tuned model on the test set, run
 
 ```bash
-roberta-snli evaluate
+./roberta-snli evaluate
 ```
 
 And to serve a fine-tuned model as a production-grade webservice with batched prediction, run
 
 ```bash
-roberta-snli serve
+./roberta-snli serve
 ```
 
 This will serve on port 3030 by default. You can then test it out by running:
