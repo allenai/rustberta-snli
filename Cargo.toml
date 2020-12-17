@@ -21,6 +21,6 @@ flume = "0.10"
 num_cpus = "1.13"
 crossbeam = "0.8"
 rand = "0.7.3"
-batched-fn = { version = "0.2.0" }
+batched-fn = { version = "0.2.2" }
 tokio = { version = "0.2", features = ["full"] }
 warp = "0.2.5"
